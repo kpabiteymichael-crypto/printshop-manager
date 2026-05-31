@@ -3,9 +3,15 @@ import { expensesApi, cashApi } from '../lib/api';
 import { Receipt, Plus, Trash2, Calendar } from 'lucide-react';
 import clsx from 'clsx';
 
-const php = (v: string | number) => `₱${Number(v).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+const fmt = (v: string | number) => `GH₵${Number(v).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 
-const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'gcash', 'maya', 'credit'];
+const PAYMENT_METHODS = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'mtn_momo', label: 'MTN MoMo' },
+  { value: 'telecel_cash', label: 'Telecel Cash' },
+  { value: 'airteltigo', label: 'AirtelTigo Money' },
+  { value: 'bank_transfer', label: 'Bank Transfer' },
+];
 
 export default function Expenses() {
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -55,11 +61,11 @@ export default function Expenses() {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="card dark:bg-slate-800 dark:border-slate-700/50">
-          <div className="text-2xl font-bold text-red-600 dark:text-red-400">{php(totalToday)}</div>
+          <div className="text-2xl font-bold text-red-600 dark:text-red-400">{fmt(totalToday)}</div>
           <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">Today's Expenses</div>
         </div>
         <div className="card dark:bg-slate-800 dark:border-slate-700/50">
-          <div className="text-2xl font-bold text-slate-900 dark:text-white">{php(totalMonth)}</div>
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">{fmt(totalMonth)}</div>
           <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">Total ({expenses.length} records)</div>
         </div>
       </div>
@@ -94,7 +100,7 @@ export default function Expenses() {
                     <td className="px-4 py-3">
                       <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-xs font-semibold uppercase">{exp.paymentMethod}</span>
                     </td>
-                    <td className="px-4 py-3 text-right font-bold text-red-600 dark:text-red-400">{php(exp.amount)}</td>
+                    <td className="px-4 py-3 text-right font-bold text-red-600 dark:text-red-400">{fmt(exp.amount)}</td>
                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{exp.recordedByName || '—'}</td>
                     <td className="px-4 py-3">
                       <button onClick={() => handleDelete(exp.id)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
@@ -141,7 +147,7 @@ export default function Expenses() {
                 <div>
                   <label className="label dark:text-slate-300">Payment Method</label>
                   <select value={form.paymentMethod} onChange={e => setForm(p => ({ ...p, paymentMethod: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white">
-                    {PAYMENT_METHODS.map(m => <option key={m} value={m} className="capitalize">{m}</option>)}
+                    {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
               </div>

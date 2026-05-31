@@ -7,7 +7,7 @@ import { relations } from 'drizzle-orm';
 // ─── Enums ───────────────────────────────────────────────
 export const userRoleEnum = pgEnum('user_role', ['owner', 'manager', 'cashier', 'print_operator', 'inventory_officer']);
 export const printJobStatusEnum = pgEnum('print_job_status', ['pending', 'in_progress', 'completed', 'cancelled']);
-export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'card', 'transfer', 'gcash', 'maya', 'credit']);
+export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer']);
 export const movementTypeEnum = pgEnum('movement_type', ['in', 'out', 'adjustment']);
 export const cashSessionStatusEnum = pgEnum('cash_session_status', ['open', 'closed']);
 export const poStatusEnum = pgEnum('po_status', ['draft', 'ordered', 'partial', 'received', 'cancelled']);
@@ -206,8 +206,10 @@ export const sales = pgTable('sales', {
   taxAmount: decimal('tax_amount', { precision: 10, scale: 2 }).notNull().default('0'),
   totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
   paymentMethod: paymentMethodEnum('payment_method').notNull().default('cash'),
+  paymentReference: text('payment_reference'),
   paymentStatus: text('payment_status').notNull().default('paid'),
   notes: text('notes'),
+  isRefunded: boolean('is_refunded').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (t) => ({
   saleNumberIdx: uniqueIndex('sales_number_idx').on(t.saleNumber),
@@ -227,6 +229,7 @@ export const saleItems = pgTable('sale_items', {
   unitPrice: decimal('unit_price', { precision: 10, scale: 2 }).notNull(),
   discount: decimal('discount', { precision: 10, scale: 2 }).notNull().default('0'),
   totalPrice: decimal('total_price', { precision: 10, scale: 2 }).notNull(),
+  isRefunded: boolean('is_refunded').default(false).notNull(),
 }, (t) => ({
   saleIdx: index('sale_items_sale_idx').on(t.saleId),
 }));

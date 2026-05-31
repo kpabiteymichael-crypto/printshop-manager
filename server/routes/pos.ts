@@ -1,14 +1,101 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
-import { sales, saleItems, products, inventoryItems, cashSessions, customers, receipts } from '../db/schema';
-import { eq, sql } from 'drizzle-orm';
+import {
+  sales, saleItems, products, services, inventoryItems,
+  cashSessions, customers, receipts, users,
+} from '../db/schema';
+import { eq, sql, and, ilike, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 router.use(authenticate);
 
+// ─── Products for POS (with stock levels, barcode/SKU search) ────────────────
+router.get('/products', async (req, res) => {
+  try {
+    const search = (req.query.search as string | undefined)?.trim();
+    const categoryId = req.query.categoryId ? Number(req.query.categoryId) : undefined;
+
+    const { productCategories } = await import('../db/schema');
+
+    let list = await db.select({
+      id: products.id,
+      name: products.name,
+      sku: products.sku,
+      price: products.price,
+      unit: products.unit,
+      isActive: products.isActive,
+      categoryId: products.categoryId,
+      description: products.description,
+      categoryName: productCategories.name,
+      quantityInStock: inventoryItems.quantityInStock,
+      reorderLevel: inventoryItems.reorderLevel,
+    })
+      .from(products)
+      .leftJoin(productCategories, eq(products.categoryId, productCategories.id))
+      .leftJoin(inventoryItems, eq(products.id, inventoryItems.productId))
+      .where(eq(products.isActive, true));
+
+    if (search) {
+      const lc = search.toLowerCase();
+      list = list.filter(p =>
+        p.name.toLowerCase().includes(lc) ||
+        p.sku.toLowerCase().includes(lc) ||
+        (p.description ?? '').toLowerCase().includes(lc)
+      );
+    }
+    if (categoryId) {
+      list = list.filter(p => p.categoryId === categoryId);
+    }
+
+    return res.json(list);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch products' });
+  }
+});
+
+// ─── Services for POS ────────────────────────────────────────────────────────
+router.get('/services', async (_req, res) => {
+  try {
+    return res.json(await db.select().from(services).where(eq(services.isActive, true)));
+  } catch { return res.status(500).json({ error: 'Failed to fetch services' }); }
+});
+
+// ─── Lookup product by barcode (SKU) ─────────────────────────────────────────
+router.get('/barcode/:sku', async (req, res) => {
+  try {
+    const { productCategories } = await import('../db/schema');
+    const [item] = await db.select({
+      id: products.id,
+      name: products.name,
+      sku: products.sku,
+      price: products.price,
+      unit: products.unit,
+      isActive: products.isActive,
+      categoryId: products.categoryId,
+      description: products.description,
+      categoryName: productCategories.name,
+      quantityInStock: inventoryItems.quantityInStock,
+      reorderLevel: inventoryItems.reorderLevel,
+    })
+      .from(products)
+      .leftJoin(productCategories, eq(products.categoryId, productCategories.id))
+      .leftJoin(inventoryItems, eq(products.id, inventoryItems.productId))
+      .where(and(
+        eq(products.sku, req.params.sku),
+        eq(products.isActive, true),
+      ))
+      .limit(1);
+
+    if (!item) return res.status(404).json({ error: 'Product not found for this barcode' });
+    return res.json(item);
+  } catch { return res.status(500).json({ error: 'Barcode lookup failed' }); }
+});
+
+// ─── Create Sale ─────────────────────────────────────────────────────────────
 const saleItemSchema = z.object({
   productId: z.number().optional(),
   serviceId: z.number().optional(),
@@ -30,81 +117,233 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
       discountAmount: z.string().default('0'),
       taxAmount: z.string().default('0'),
       totalAmount: z.string(),
-      paymentMethod: z.enum(['cash', 'card', 'transfer', 'gcash', 'maya', 'credit']).default('cash'),
+      paymentMethod: z.enum(['cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer']).default('cash'),
+      paymentReference: z.string().optional(),
       notes: z.string().optional(),
     }).parse(req.body);
 
-    // Generate sale number
-    const [lastSale] = await db.select({ saleNumber: sales.saleNumber })
-      .from(sales).orderBy(sql`id DESC`).limit(1);
-    const nextNum = lastSale
-      ? String(Number(lastSale.saleNumber.split('-')[2]) + 1).padStart(4, '0')
-      : '0001';
-    const saleNumber = `SL-${new Date().getFullYear()}-${nextNum}`;
-
-    const [sale] = await db.insert(sales).values({
-      saleNumber,
-      customerId: data.customerId,
-      cashierId: req.user!.id,
-      cashSessionId: data.cashSessionId,
-      subtotal: data.subtotal,
-      discountAmount: data.discountAmount,
-      taxAmount: data.taxAmount,
-      totalAmount: data.totalAmount,
-      paymentMethod: data.paymentMethod,
-      paymentStatus: 'paid',
-      notes: data.notes,
-    }).returning();
-
-    await db.insert(saleItems).values(
-      data.items.map(item => ({ ...item, saleId: sale.id }))
-    );
-
-    // Deduct inventory for product items
+    // Validate stock for product items (outside transaction — reads only)
     for (const item of data.items) {
       if (item.productId) {
-        await db.update(inventoryItems)
-          .set({ quantityInStock: sql`quantity_in_stock - ${item.quantity}`, updatedAt: new Date() })
-          .where(eq(inventoryItems.productId, item.productId));
+        const [inv] = await db.select({ quantityInStock: inventoryItems.quantityInStock })
+          .from(inventoryItems)
+          .where(eq(inventoryItems.productId, item.productId))
+          .limit(1);
+        if (!inv || inv.quantityInStock < item.quantity) {
+          const [prod] = await db.select({ name: products.name }).from(products).where(eq(products.id, item.productId)).limit(1);
+          return res.status(400).json({
+            error: `Insufficient stock for "${prod?.name ?? 'product'}". Available: ${inv?.quantityInStock ?? 0}, Requested: ${item.quantity}`,
+          });
+        }
       }
     }
 
-    // Update cash session totals
-    if (data.cashSessionId) {
-      await db.update(cashSessions)
-        .set({ totalSales: sql`total_sales + ${parseFloat(data.totalAmount)}` })
-        .where(eq(cashSessions.id, data.cashSessionId));
-    }
+    const { sale, saleNumber, receiptNumber } = await db.transaction(async (tx) => {
+      // Generate sale number
+      const [lastSale] = await tx.select({ saleNumber: sales.saleNumber })
+        .from(sales).orderBy(sql`id DESC`).limit(1);
+      const nextNum = lastSale
+        ? String(Number(lastSale.saleNumber.split('-')[2]) + 1).padStart(4, '0')
+        : '0001';
+      const saleNumber = `SL-${new Date().getFullYear()}-${nextNum}`;
 
-    // Generate receipt
-    const [lastReceipt] = await db.select({ receiptNumber: receipts.receiptNumber })
-      .from(receipts).orderBy(sql`id DESC`).limit(1);
-    const nextRNum = lastReceipt
-      ? String(Number(lastReceipt.receiptNumber.split('-')[2]) + 1).padStart(4, '0')
-      : '0001';
-    const receiptNumber = `RC-${new Date().getFullYear()}-${nextRNum}`;
+      const [sale] = await tx.insert(sales).values({
+        saleNumber,
+        customerId: data.customerId,
+        cashierId: req.user!.id,
+        cashSessionId: data.cashSessionId,
+        subtotal: data.subtotal,
+        discountAmount: data.discountAmount,
+        taxAmount: data.taxAmount,
+        totalAmount: data.totalAmount,
+        paymentMethod: data.paymentMethod,
+        paymentReference: data.paymentReference,
+        paymentStatus: 'paid',
+        notes: data.notes,
+      }).returning();
 
-    await db.insert(receipts).values({
-      saleId: sale.id,
-      receiptNumber,
-      generatedBy: req.user!.id,
+      await tx.insert(saleItems).values(
+        data.items.map(item => ({ ...item, saleId: sale.id }))
+      );
+
+      // Deduct inventory
+      for (const item of data.items) {
+        if (item.productId) {
+          await tx.update(inventoryItems)
+            .set({ quantityInStock: sql`quantity_in_stock - ${item.quantity}`, updatedAt: new Date() })
+            .where(eq(inventoryItems.productId, item.productId));
+        }
+      }
+
+      // Update customer total spent
+      if (data.customerId) {
+        await tx.update(customers)
+          .set({ totalSpent: sql`total_spent + ${parseFloat(data.totalAmount)}`, updatedAt: new Date() })
+          .where(eq(customers.id, data.customerId));
+      }
+
+      // Update cash session totals
+      if (data.cashSessionId) {
+        await tx.update(cashSessions)
+          .set({ totalSales: sql`total_sales + ${parseFloat(data.totalAmount)}` })
+          .where(eq(cashSessions.id, data.cashSessionId));
+      }
+
+      // Generate receipt
+      const [lastReceipt] = await tx.select({ receiptNumber: receipts.receiptNumber })
+        .from(receipts).orderBy(sql`id DESC`).limit(1);
+      const nextRNum = lastReceipt
+        ? String(Number(lastReceipt.receiptNumber.split('-')[2]) + 1).padStart(4, '0')
+        : '0001';
+      const receiptNumber = `RCP-${new Date().getFullYear()}-${nextRNum}`;
+
+      await tx.insert(receipts).values({
+        saleId: sale.id,
+        receiptNumber,
+        generatedBy: req.user!.id,
+      });
+
+      return { sale, saleNumber, receiptNumber };
     });
 
-    return res.status(201).json({ sale, saleNumber, receiptNumber });
+    return res.status(201).json({ sale, saleNumber, receiptNumber, cashierName: req.user!.name });
   } catch (err: any) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
+    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors[0]?.message ?? 'Validation error' });
     console.error(err);
     return res.status(500).json({ error: 'Failed to process sale' });
   }
 });
 
+// ─── Get Receipt by number ────────────────────────────────────────────────────
+router.get('/receipt/:receiptNumber', async (req, res) => {
+  try {
+    const [receipt] = await db.select().from(receipts)
+      .where(eq(receipts.receiptNumber, req.params.receiptNumber))
+      .limit(1);
+    if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
+
+    const [sale] = await db.select({
+      id: sales.id,
+      saleNumber: sales.saleNumber,
+      subtotal: sales.subtotal,
+      discountAmount: sales.discountAmount,
+      taxAmount: sales.taxAmount,
+      totalAmount: sales.totalAmount,
+      paymentMethod: sales.paymentMethod,
+      paymentStatus: sales.paymentStatus,
+      isRefunded: (sales as any).isRefunded,
+      createdAt: sales.createdAt,
+      customerName: customers.name,
+      cashierName: users.name,
+    }).from(sales)
+      .leftJoin(customers, eq(sales.customerId, customers.id))
+      .leftJoin(users, eq(sales.cashierId, users.id))
+      .where(eq(sales.id, receipt.saleId))
+      .limit(1);
+
+    if (!sale) return res.status(404).json({ error: 'Sale not found' });
+
+    const items = await db.select().from(saleItems).where(eq(saleItems.saleId, sale.id));
+
+    return res.json({ receipt, sale, items });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch receipt' });
+  }
+});
+
+// ─── Refund Sale ─────────────────────────────────────────────────────────────
+router.post('/sales/:id/refund', authorize('owner', 'manager', 'cashier'), async (req: AuthRequest, res) => {
+  try {
+    const saleId = Number(req.params.id);
+    const { itemIds } = z.object({ itemIds: z.array(z.number()).min(1) }).parse(req.body);
+
+    const [sale] = await db.select().from(sales).where(eq(sales.id, saleId)).limit(1);
+    if (!sale) return res.status(404).json({ error: 'Sale not found' });
+
+    const allItems = await db.select().from(saleItems).where(eq(saleItems.saleId, saleId));
+
+    // Filter to only items requested AND not already refunded (idempotency guard)
+    const selectedItems = allItems.filter(i => itemIds.includes(i.id) && !(i as any).isRefunded);
+    if (selectedItems.length === 0) {
+      return res.status(400).json({ error: 'No refundable items found — they may have already been refunded' });
+    }
+
+    const { refundTotal, refundReceiptNumber } = await db.transaction(async (tx) => {
+      // Mark each item as refunded
+      for (const item of selectedItems) {
+        await tx.update(saleItems)
+          .set({ isRefunded: true } as any)
+          .where(eq(saleItems.id, item.id));
+      }
+
+      // Restore inventory for product items
+      for (const item of selectedItems) {
+        if (item.productId) {
+          await tx.update(inventoryItems)
+            .set({ quantityInStock: sql`quantity_in_stock + ${item.quantity}`, updatedAt: new Date() })
+            .where(eq(inventoryItems.productId, item.productId));
+        }
+      }
+
+      const refundTotal = selectedItems.reduce((sum, i) => sum + parseFloat(i.totalPrice), 0);
+
+      // If all items are now refunded, mark the whole sale as refunded
+      const remainingActive = allItems.filter(i => !itemIds.includes(i.id) && !(i as any).isRefunded);
+      if (remainingActive.length === 0) {
+        await tx.update(sales).set({ isRefunded: true } as any).where(eq(sales.id, saleId));
+      }
+
+      // Update cash session totals
+      if (sale.cashSessionId) {
+        await tx.update(cashSessions)
+          .set({ totalSales: sql`total_sales - ${refundTotal}` })
+          .where(eq(cashSessions.id, sale.cashSessionId));
+      }
+
+      // Generate refund receipt number
+      const [lastReceipt] = await tx.select({ receiptNumber: receipts.receiptNumber })
+        .from(receipts).orderBy(sql`id DESC`).limit(1);
+      const nextRNum = lastReceipt
+        ? String(Number(lastReceipt.receiptNumber.split('-')[2]) + 1).padStart(4, '0')
+        : '0001';
+      const refundReceiptNumber = `REF-${new Date().getFullYear()}-${nextRNum}`;
+
+      await tx.insert(receipts).values({
+        saleId,
+        receiptNumber: refundReceiptNumber,
+        generatedBy: req.user!.id,
+      });
+
+      return { refundTotal, refundReceiptNumber };
+    });
+
+    return res.json({
+      success: true,
+      refundTotal: refundTotal.toFixed(2),
+      refundReceiptNumber,
+      refundedItems: selectedItems.length,
+    });
+  } catch (err: any) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid request' });
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to process refund' });
+  }
+});
+
+// ─── List Sales ───────────────────────────────────────────────────────────────
 router.get('/sales', async (req, res) => {
   try {
     const sessionId = req.query.sessionId ? Number(req.query.sessionId) : undefined;
-    const { and } = await import('drizzle-orm');
-    const conditions = sessionId
-      ? and(eq(sales.cashSessionId, sessionId))
-      : undefined;
+    const dateStr = req.query.date as string | undefined; // YYYY-MM-DD filter
+
+    const conditions: any[] = [];
+    if (sessionId) conditions.push(eq(sales.cashSessionId, sessionId));
+    if (dateStr) {
+      const start = new Date(`${dateStr}T00:00:00.000Z`);
+      const end = new Date(`${dateStr}T23:59:59.999Z`);
+      conditions.push(sql`sales.created_at >= ${start} AND sales.created_at <= ${end}`);
+    }
 
     const results = await db.select({
       id: sales.id,
@@ -117,19 +356,38 @@ router.get('/sales', async (req, res) => {
       customerName: customers.name,
     }).from(sales)
       .leftJoin(customers, eq(sales.customerId, customers.id))
-      .where(conditions)
+      .where(conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions))
       .orderBy(sql`sales.created_at DESC`);
 
     return res.json(results);
   } catch { return res.status(500).json({ error: 'Failed to fetch sales' }); }
 });
 
+// ─── Get Single Sale ──────────────────────────────────────────────────────────
 router.get('/sales/:id', async (req, res) => {
   try {
-    const [sale] = await db.select().from(sales).where(eq(sales.id, Number(req.params.id))).limit(1);
+    const [sale] = await db.select({
+      id: sales.id,
+      saleNumber: sales.saleNumber,
+      subtotal: sales.subtotal,
+      discountAmount: sales.discountAmount,
+      taxAmount: sales.taxAmount,
+      totalAmount: sales.totalAmount,
+      paymentMethod: sales.paymentMethod,
+      paymentStatus: sales.paymentStatus,
+      createdAt: sales.createdAt,
+      customerName: customers.name,
+      cashierName: users.name,
+    }).from(sales)
+      .leftJoin(customers, eq(sales.customerId, customers.id))
+      .leftJoin(users, eq(sales.cashierId, users.id))
+      .where(eq(sales.id, Number(req.params.id)))
+      .limit(1);
+
     if (!sale) return res.status(404).json({ error: 'Sale not found' });
     const items = await db.select().from(saleItems).where(eq(saleItems.saleId, sale.id));
-    return res.json({ ...sale, items });
+    const [receipt] = await db.select().from(receipts).where(eq(receipts.saleId, sale.id)).limit(1);
+    return res.json({ ...sale, items, receiptNumber: receipt?.receiptNumber });
   } catch { return res.status(500).json({ error: 'Failed to fetch sale' }); }
 });
 

@@ -43,7 +43,7 @@ router.post('/', authorize('owner', 'manager', 'cashier'), async (req: AuthReque
       cashSessionId: z.number().optional(),
       description: z.string().min(1),
       amount: z.string(),
-      paymentMethod: z.enum(['cash', 'card', 'transfer', 'gcash', 'maya', 'credit']).default('cash'),
+      paymentMethod: z.enum(['cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer']).default('cash'),
       referenceNumber: z.string().optional(),
       expenseDate: z.string().optional(),
       notes: z.string().optional(),

@@ -48,16 +48,12 @@ export async function runMigrations() {
   `);
 
   // Drop old enums — only drop user_role if it contains old EduAnalytics values
-  // (student, teacher, admin, parent). If it already has PrintShop values, keep it
-  // so the users table and its role column remain intact.
   await db.execute(sql`
     DO $$ BEGIN
-      -- Drop old EduAnalytics-specific enums unconditionally (tables already gone)
       DROP TYPE IF EXISTS subject CASCADE;
       DROP TYPE IF EXISTS badge_category CASCADE;
       DROP TYPE IF EXISTS risk_level CASCADE;
 
-      -- Only drop/replace user_role if it still has old EduAnalytics labels
       IF EXISTS (
         SELECT 1 FROM pg_enum e
         JOIN pg_type t ON e.enumtypid = t.oid
@@ -71,7 +67,6 @@ export async function runMigrations() {
   `);
 
   // Repair: add role column back to users table if it was dropped by CASCADE
-  // (this handles the case where a previous migration run removed it)
   await db.execute(sql`
     DO $$ BEGIN
       IF EXISTS (
@@ -81,13 +76,31 @@ export async function runMigrations() {
         SELECT 1 FROM information_schema.columns
         WHERE table_name = 'users' AND column_name = 'role'
       ) THEN
-        -- users table exists but role column is missing — drop and recreate
         DROP TABLE users CASCADE;
       END IF;
     END $$;
   `);
 
-  // Create new enums
+  // Migrate payment_method enum to Ghanaian methods if it has old values (gcash/maya/card/credit)
+  // Drop the dependent tables first (they'll be recreated by the CREATE TABLE IF NOT EXISTS blocks below)
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'payment_method'
+          AND e.enumlabel IN ('gcash', 'maya', 'card', 'credit')
+      ) THEN
+        DROP TABLE IF EXISTS receipts CASCADE;
+        DROP TABLE IF EXISTS sale_items CASCADE;
+        DROP TABLE IF EXISTS expenses CASCADE;
+        DROP TABLE IF EXISTS sales CASCADE;
+        DROP TYPE IF EXISTS payment_method CASCADE;
+      END IF;
+    END $$;
+  `);
+
+  // Create new enums (idempotent)
   await db.execute(sql`
     DO $$ BEGIN
       CREATE TYPE user_role AS ENUM ('owner', 'manager', 'cashier', 'print_operator', 'inventory_officer');
@@ -96,7 +109,7 @@ export async function runMigrations() {
       CREATE TYPE print_job_status AS ENUM ('pending', 'in_progress', 'completed', 'cancelled');
     EXCEPTION WHEN duplicate_object THEN null; END $$;
     DO $$ BEGIN
-      CREATE TYPE payment_method AS ENUM ('cash', 'card', 'transfer', 'gcash', 'maya', 'credit');
+      CREATE TYPE payment_method AS ENUM ('cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer');
     EXCEPTION WHEN duplicate_object THEN null; END $$;
     DO $$ BEGIN
       CREATE TYPE movement_type AS ENUM ('in', 'out', 'adjustment');
@@ -328,14 +341,28 @@ export async function runMigrations() {
       tax_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
       total_amount DECIMAL(10,2) NOT NULL,
       payment_method payment_method NOT NULL DEFAULT 'cash',
+      payment_reference TEXT,
       payment_status TEXT NOT NULL DEFAULT 'paid',
       notes TEXT,
+      is_refunded BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS sales_number_idx ON sales(sale_number);
     CREATE INDEX IF NOT EXISTS sales_cashier_idx ON sales(cashier_id);
     CREATE INDEX IF NOT EXISTS sales_session_idx ON sales(cash_session_id);
     CREATE INDEX IF NOT EXISTS sales_created_idx ON sales(created_at);
+  `);
+
+  // Add missing columns to sales if table already exists
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sales' AND column_name='payment_reference') THEN
+        ALTER TABLE sales ADD COLUMN payment_reference TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sales' AND column_name='is_refunded') THEN
+        ALTER TABLE sales ADD COLUMN is_refunded BOOLEAN NOT NULL DEFAULT false;
+      END IF;
+    END $$;
   `);
 
   await db.execute(sql`
@@ -349,9 +376,19 @@ export async function runMigrations() {
       quantity INTEGER NOT NULL DEFAULT 1,
       unit_price DECIMAL(10,2) NOT NULL,
       discount DECIMAL(10,2) NOT NULL DEFAULT 0,
-      total_price DECIMAL(10,2) NOT NULL
+      total_price DECIMAL(10,2) NOT NULL,
+      is_refunded BOOLEAN NOT NULL DEFAULT false
     );
     CREATE INDEX IF NOT EXISTS sale_items_sale_idx ON sale_items(sale_id);
+  `);
+
+  // Add is_refunded column to sale_items if it was created before this migration
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sale_items' AND column_name='is_refunded') THEN
+        ALTER TABLE sale_items ADD COLUMN is_refunded BOOLEAN NOT NULL DEFAULT false;
+      END IF;
+    END $$;
   `);
 
   await db.execute(sql`
