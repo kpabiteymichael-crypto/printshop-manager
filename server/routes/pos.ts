@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
 import {
-  sales, saleItems, products, services, inventoryItems,
+  sales, saleItems, products, services, inventoryItems, inventoryMovements,
   cashSessions, customers, receipts, users,
 } from '../db/schema';
 import { eq, sql, and, ilike, or } from 'drizzle-orm';
@@ -123,9 +123,11 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
     }).parse(req.body);
 
     // Validate stock for product items (outside transaction — reads only)
+    // Also build inventory map for movement logging later
+    const inventoryMap: Record<number, { id: number; quantityInStock: number }> = {};
     for (const item of data.items) {
       if (item.productId) {
-        const [inv] = await db.select({ quantityInStock: inventoryItems.quantityInStock })
+        const [inv] = await db.select({ id: inventoryItems.id, quantityInStock: inventoryItems.quantityInStock })
           .from(inventoryItems)
           .where(eq(inventoryItems.productId, item.productId))
           .limit(1);
@@ -135,6 +137,7 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
             error: `Insufficient stock for "${prod?.name ?? 'product'}". Available: ${inv?.quantityInStock ?? 0}, Requested: ${item.quantity}`,
           });
         }
+        inventoryMap[item.productId] = inv;
       }
     }
 
@@ -166,12 +169,21 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
         data.items.map(item => ({ ...item, saleId: sale.id }))
       );
 
-      // Deduct inventory
+      // Deduct inventory and log movements
       for (const item of data.items) {
         if (item.productId) {
           await tx.update(inventoryItems)
             .set({ quantityInStock: sql`quantity_in_stock - ${item.quantity}`, updatedAt: new Date() })
             .where(eq(inventoryItems.productId, item.productId));
+
+          const inv = inventoryMap[item.productId];
+          if (inv) {
+            const balanceAfter = inv.quantityInStock - item.quantity;
+            await tx.execute(sql`
+              INSERT INTO inventory_movements (inventory_item_id, type, quantity, balance_after, reason, reference_id, reference_type, created_by)
+              VALUES (${inv.id}, 'sale', ${item.quantity}, ${balanceAfter}, ${'POS Sale'}, ${sale.id}, ${'sale'}, ${req.user!.id})
+            `);
+          }
         }
       }
 

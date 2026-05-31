@@ -112,7 +112,7 @@ export async function runMigrations() {
       CREATE TYPE payment_method AS ENUM ('cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer');
     EXCEPTION WHEN duplicate_object THEN null; END $$;
     DO $$ BEGIN
-      CREATE TYPE movement_type AS ENUM ('in', 'out', 'adjustment');
+      CREATE TYPE movement_type AS ENUM ('in', 'out', 'adjustment', 'sale');
     EXCEPTION WHEN duplicate_object THEN null; END $$;
     DO $$ BEGIN
       CREATE TYPE cash_session_status AS ENUM ('open', 'closed');
@@ -456,6 +456,58 @@ export async function runMigrations() {
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
     CREATE INDEX IF NOT EXISTS staff_activity_user_idx ON staff_activity(user_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS book_metadata (
+      id SERIAL PRIMARY KEY,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      isbn TEXT,
+      author TEXT,
+      publisher TEXT,
+      subject TEXT,
+      educational_level TEXT,
+      edition TEXT,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS book_metadata_product_idx ON book_metadata(product_id);
+  `);
+
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='inventory_movements' AND column_name='balance_after') THEN
+        ALTER TABLE inventory_movements ADD COLUMN balance_after INTEGER;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='inventory_movements' AND column_name='cost_price') THEN
+        ALTER TABLE inventory_movements ADD COLUMN cost_price DECIMAL(10,2);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='inventory_movements' AND column_name='supplier_id') THEN
+        ALTER TABLE inventory_movements ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='inventory_movements' AND column_name='invoice_ref') THEN
+        ALTER TABLE inventory_movements ADD COLUMN invoice_ref TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='expected_delivery_at') THEN
+        ALTER TABLE purchase_orders ADD COLUMN expected_delivery_at TIMESTAMP;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_order_items' AND column_name='received_quantity') THEN
+        ALTER TABLE purchase_order_items ADD COLUMN received_quantity INTEGER NOT NULL DEFAULT 0;
+      END IF;
+    END $$;
+  `);
+
+  // Add 'sale' to movement_type enum if not already present
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_enum
+        JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+        WHERE pg_type.typname = 'movement_type' AND pg_enum.enumlabel = 'sale'
+      ) THEN
+        ALTER TYPE movement_type ADD VALUE 'sale';
+      END IF;
+    END $$;
   `);
 
   console.log('Migrations completed successfully!');

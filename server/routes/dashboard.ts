@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
-import { sales, expenses, printJobs, customers, products, inventoryItems, cashSessions } from '../db/schema';
-import { sql, eq, gte, and } from 'drizzle-orm';
+import { sales, saleItems, expenses, printJobs, customers, products, inventoryItems, cashSessions } from '../db/schema';
+import { sql, eq, gte, desc } from 'drizzle-orm';
 
 const router = Router();
 
@@ -32,6 +32,35 @@ router.get('/summary', authenticate, authorize('owner', 'manager'), async (_req,
       .from(inventoryItems)
       .where(sql`quantity_in_stock <= reorder_level`);
 
+    const [outOfStock] = await db.select({ count: sql<number>`COUNT(*)` })
+      .from(inventoryItems)
+      .where(sql`quantity_in_stock = 0`);
+
+    const inventoryValueResult = await db.execute(sql`
+      SELECT COALESCE(SUM(ii.quantity_in_stock * p.cost_price::numeric), 0) as total_value
+      FROM inventory_items ii
+      JOIN products p ON p.id = ii.product_id
+      WHERE p.cost_price IS NOT NULL
+    `);
+
+    const topMovingResult = await db.execute(sql`
+      SELECT
+        p.id,
+        p.name,
+        p.sku,
+        COALESCE(SUM(recent.qty), 0) AS units_sold
+      FROM products p
+      LEFT JOIN (
+        SELECT si.product_id, si.quantity AS qty
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        WHERE s.created_at >= NOW() - INTERVAL '30 days'
+      ) recent ON recent.product_id = p.id
+      GROUP BY p.id, p.name, p.sku
+      ORDER BY units_sold DESC
+      LIMIT 5
+    `);
+
     const [openSession] = await db.select().from(cashSessions)
       .where(eq(cashSessions.status, 'open')).limit(1);
 
@@ -52,6 +81,9 @@ router.get('/summary', authenticate, authorize('owner', 'manager'), async (_req,
       inProgressJobs: Number(inProgressJobs.count),
       totalCustomers: Number(totalCustomers.count),
       lowStockItems: Number(lowStock.count),
+      outOfStockItems: Number(outOfStock.count),
+      inventoryValue: Number((inventoryValueResult as any).rows?.[0]?.total_value ?? 0),
+      topMovingProducts: (topMovingResult as any).rows ?? [],
       hasOpenSession: !!openSession,
       openSession: openSession || null,
       monthlySales,

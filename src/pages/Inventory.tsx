@@ -1,42 +1,131 @@
-import { useEffect, useState } from 'react';
-import { inventoryApi, productsApi } from '../lib/api';
-import { Package, AlertTriangle, TrendingDown, ArrowUp, ArrowDown, RotateCcw, Plus } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { inventoryApi, productsApi, suppliersApi } from '../lib/api';
+import {
+  Package, AlertTriangle, TrendingDown, ArrowUp, ArrowDown, RotateCcw,
+  Plus, Search, History, ChevronLeft, ChevronRight, X, Edit2, DollarSign,
+} from 'lucide-react';
 import clsx from 'clsx';
 
-const php = (v: string | number) => `₱${Number(v).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+const fmt = (v: string | number) => `₵${Number(v).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+const fmtDate = (d: string) => new Date(d).toLocaleString('en-GH', { dateStyle: 'medium', timeStyle: 'short' });
+
+const STOCK_OUT_REASONS = ['Damaged', 'Expired', 'Lost', 'Sample/Demo', 'Internal Use', 'Write-off', 'Other'];
+const UNITS = ['piece', 'box', 'ream', 'set', 'pack', 'bottle', 'roll', 'book'];
+
+type Tab = 'list' | 'history';
 
 export default function Inventory() {
-  const [items, setItems] = useState<any[]>([]);
+  const [data, setData] = useState<{ items: any[]; totalValue: number; lowStockCount: number; outOfStockCount: number }>({ items: [], totalValue: 0, lowStockCount: 0, outOfStockCount: 0 });
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<Tab>('list');
   const [search, setSearch] = useState('');
-  const [showAdjust, setShowAdjust] = useState<any>(null);
-  const [adjustForm, setAdjustForm] = useState({ type: 'in', quantity: '1', reason: '' });
-  const [saving, setSaving] = useState(false);
-  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterStock, setFilterStock] = useState<'' | 'low' | 'out'>('');
   const [categories, setCategories] = useState<any[]>([]);
-  const [productForm, setProductForm] = useState({ categoryId: '', name: '', sku: '', price: '', costPrice: '', unit: 'piece', description: '' });
+  const [suppliers, setSuppliers] = useState<any[]>([]);
 
-  const load = () => {
+  const [showStockIn, setShowStockIn] = useState<any>(null);
+  const [showStockOut, setShowStockOut] = useState<any>(null);
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [showEditProduct, setShowEditProduct] = useState<any>(null);
+  const [showHistory, setShowHistory] = useState<any>(null);
+
+  const [stockInForm, setStockInForm] = useState({ quantity: '1', costPrice: '', supplierId: '', invoiceRef: '', notes: '' });
+  const [stockOutForm, setStockOutForm] = useState({ quantity: '1', reason: 'Damaged', notes: '' });
+  const [productForm, setProductForm] = useState({ categoryId: '', name: '', sku: '', price: '', costPrice: '', unit: 'piece', description: '', reorderLevel: '10' });
+  const [saving, setSaving] = useState(false);
+
+  const [history, setHistory] = useState<{ movements: any[]; total: number; page: number; limit: number }>({ movements: [], total: 0, page: 1, limit: 20 });
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const [globalHistory, setGlobalHistory] = useState<{ movements: any[]; total: number; page: number; limit: number }>({ movements: [], total: 0, page: 1, limit: 20 });
+  const [globalHistoryLoading, setGlobalHistoryLoading] = useState(false);
+  const [globalHistoryType, setGlobalHistoryType] = useState('');
+
+  const load = useCallback(async () => {
     setLoading(true);
-    inventoryApi.list().then(setItems).finally(() => setLoading(false));
+    try {
+      const params: any = {};
+      if (filterCategory) params.category = Number(filterCategory);
+      if (filterStock === 'low') params.lowStock = true;
+      if (filterStock === 'out') params.outOfStock = true;
+      const result = await inventoryApi.list(params);
+      setData(result);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterCategory, filterStock]);
+
+  useEffect(() => {
+    load();
+    Promise.all([productsApi.categories(), suppliersApi.list()]).then(([cats, sups]) => {
+      setCategories(cats);
+      setSuppliers(sups.filter((s: any) => s.isActive));
+    });
+  }, [load]);
+
+  useEffect(() => {
+    if (tab === 'history' && globalHistory.movements.length === 0 && !globalHistoryLoading) {
+      loadGlobalHistory(1, '');
+    }
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filtered = (data.items || []).filter(i =>
+    !search ||
+    i.productName?.toLowerCase().includes(search.toLowerCase()) ||
+    i.productSku?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const loadHistory = async (item: any, page = 1) => {
+    setHistoryLoading(true);
+    try {
+      const result = await inventoryApi.history(item.id, page, 20);
+      setHistory({ ...result, page });
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
-  useEffect(() => { load(); productsApi.categories().then(setCategories); }, []);
+  const loadGlobalHistory = useCallback(async (page = 1, type = globalHistoryType) => {
+    setGlobalHistoryLoading(true);
+    try {
+      const result = await inventoryApi.globalHistory(page, 20, type || undefined);
+      setGlobalHistory({ ...result, page });
+    } finally {
+      setGlobalHistoryLoading(false);
+    }
+  }, [globalHistoryType]);
 
-  const filtered = items.filter(i => !search || i.productName?.toLowerCase().includes(search.toLowerCase()) || i.productSku?.toLowerCase().includes(search.toLowerCase()));
-  const lowStock = items.filter(i => i.quantityInStock <= i.reorderLevel);
-
-  const handleAdjust = async (e: React.FormEvent) => {
+  const handleStockIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      await inventoryApi.adjust({ inventoryItemId: showAdjust.id, type: adjustForm.type, quantity: Number(adjustForm.quantity), reason: adjustForm.reason });
-      setItems(prev => prev.map(item => {
-        if (item.id !== showAdjust.id) return item;
-        const newQty = adjustForm.type === 'in' ? item.quantityInStock + Number(adjustForm.quantity) : adjustForm.type === 'out' ? item.quantityInStock - Number(adjustForm.quantity) : Number(adjustForm.quantity);
-        return { ...item, quantityInStock: newQty };
-      }));
-      setShowAdjust(null);
+      await inventoryApi.stockIn({
+        inventoryItemId: showStockIn.id,
+        quantity: Number(stockInForm.quantity),
+        costPrice: stockInForm.costPrice || undefined,
+        supplierId: stockInForm.supplierId ? Number(stockInForm.supplierId) : undefined,
+        invoiceRef: stockInForm.invoiceRef || undefined,
+        notes: stockInForm.notes || undefined,
+      });
+      setShowStockIn(null);
+      load();
+    } catch (err: any) { alert(err.message); }
+    finally { setSaving(false); }
+  };
+
+  const handleStockOut = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await inventoryApi.stockOut({
+        inventoryItemId: showStockOut.id,
+        quantity: Number(stockOutForm.quantity),
+        reason: stockOutForm.reason,
+        notes: stockOutForm.notes || undefined,
+      });
+      setShowStockOut(null);
+      load();
     } catch (err: any) { alert(err.message); }
     finally { setSaving(false); }
   };
@@ -45,131 +134,435 @@ export default function Inventory() {
     e.preventDefault();
     setSaving(true);
     try {
-      await productsApi.create({ ...productForm, categoryId: productForm.categoryId ? Number(productForm.categoryId) : undefined });
+      await productsApi.create({
+        ...productForm,
+        categoryId: productForm.categoryId ? Number(productForm.categoryId) : undefined,
+        reorderLevel: Number(productForm.reorderLevel) || 10,
+      });
       load();
       setShowAddProduct(false);
-      setProductForm({ categoryId: '', name: '', sku: '', price: '', costPrice: '', unit: 'piece', description: '' });
+      setProductForm({ categoryId: '', name: '', sku: '', price: '', costPrice: '', unit: 'piece', description: '', reorderLevel: '10' });
     } catch (err: any) { alert(err.message); }
     finally { setSaving(false); }
   };
 
-  const stockColor = (qty: number, reorder: number) => {
+  const handleEditProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await productsApi.update(showEditProduct.productId, {
+        name: showEditProduct.productName,
+        price: showEditProduct.productPrice,
+        costPrice: showEditProduct.productCostPrice,
+        unit: showEditProduct.productUnit,
+        categoryId: showEditProduct.categoryId ? Number(showEditProduct.categoryId) : undefined,
+        reorderLevel: Number(showEditProduct.reorderLevel),
+      });
+      setShowEditProduct(null);
+      load();
+    } catch (err: any) { alert(err.message); }
+    finally { setSaving(false); }
+  };
+
+  const rowClass = (qty: number, reorder: number) => {
+    if (qty === 0) return 'bg-red-50/60 dark:bg-red-900/10';
+    if (qty <= reorder) return 'bg-amber-50/60 dark:bg-amber-900/10';
+    return '';
+  };
+
+  const qtyClass = (qty: number, reorder: number) => {
     if (qty === 0) return 'text-red-600 dark:text-red-400 font-bold';
     if (qty <= reorder) return 'text-amber-600 dark:text-amber-400 font-semibold';
     return 'text-slate-900 dark:text-white';
   };
 
+  const movementTypeLabel = (type: string) => {
+    const map: Record<string, string> = { in: 'Stock In', out: 'Stock Out', adjustment: 'Adjustment', sale: 'Sale' };
+    return map[type] ?? type;
+  };
+
+  const movementTypeColor = (type: string) => {
+    if (type === 'in') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
+    if (type === 'out') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+    if (type === 'sale') return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
+    return 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
+  };
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="page-title dark:text-white flex items-center gap-2"><Package size={24} className="text-indigo-600" /> Inventory</h1>
-          <p className="page-subtitle dark:text-slate-400">{items.length} products tracked · {lowStock.length} low stock</p>
+          <h1 className="page-title dark:text-white flex items-center gap-2">
+            <Package size={24} className="text-indigo-600" /> Inventory
+          </h1>
+          <p className="page-subtitle dark:text-slate-400">
+            {data.items.length} items · {data.lowStockCount} low stock · {data.outOfStockCount} out of stock
+          </p>
         </div>
         <button onClick={() => setShowAddProduct(true)} className="btn-primary flex items-center gap-2">
           <Plus size={16} /> Add Product
         </button>
       </div>
 
-      {lowStock.length > 0 && (
-        <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl">
-          <AlertTriangle size={18} className="text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <div className="font-semibold text-amber-800 dark:text-amber-300 text-sm">{lowStock.length} item{lowStock.length > 1 ? 's' : ''} at or below reorder level</div>
-            <div className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">{lowStock.map(i => i.productName).join(', ')}</div>
-          </div>
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="card dark:bg-slate-800 dark:border-slate-700/50 p-4">
+          <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1">Total Value</div>
+          <div className="text-xl font-bold text-slate-900 dark:text-white">{fmt(data.totalValue)}</div>
         </div>
-      )}
-
-      <div>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by product name or SKU..." className="input max-w-sm dark:bg-slate-800 dark:border-slate-600 dark:text-white dark:placeholder-slate-400" />
+        <div className="card dark:bg-slate-800 dark:border-slate-700/50 p-4">
+          <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1">Total Items</div>
+          <div className="text-xl font-bold text-slate-900 dark:text-white">{data.items.length}</div>
+        </div>
+        <div className="card dark:bg-slate-800 dark:border-slate-700/50 p-4 border-l-4 border-amber-400">
+          <div className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">Low Stock</div>
+          <div className="text-xl font-bold text-amber-600 dark:text-amber-400">{data.lowStockCount}</div>
+        </div>
+        <div className="card dark:bg-slate-800 dark:border-slate-700/50 p-4 border-l-4 border-red-400">
+          <div className="text-xs text-red-600 dark:text-red-400 font-medium mb-1">Out of Stock</div>
+          <div className="text-xl font-bold text-red-600 dark:text-red-400">{data.outOfStockCount}</div>
+        </div>
       </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center h-48"><div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" /></div>
-      ) : (
-        <div className="card dark:bg-slate-800 dark:border-slate-700/50 overflow-hidden p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700">
-                  <th className="table-header px-4 py-3 text-left">Product</th>
-                  <th className="table-header px-4 py-3 text-left">SKU</th>
-                  <th className="table-header px-4 py-3 text-left">Category</th>
-                  <th className="table-header px-4 py-3 text-right">In Stock</th>
-                  <th className="table-header px-4 py-3 text-right">Reorder At</th>
-                  <th className="table-header px-4 py-3 text-right">Unit Price</th>
-                  <th className="table-header px-4 py-3 text-left">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-12 text-slate-400 dark:text-slate-500">No inventory items found</td></tr>
-                ) : filtered.map(item => (
-                  <tr key={item.id} className="border-b border-slate-50 dark:border-slate-700/30 hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{item.productName}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{item.productSku}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{item.categoryName || '—'}</td>
-                    <td className={clsx('px-4 py-3 text-right', stockColor(item.quantityInStock, item.reorderLevel))}>
-                      <span className="flex items-center justify-end gap-1">
-                        {item.quantityInStock <= item.reorderLevel && item.quantityInStock > 0 && <TrendingDown size={12} className="text-amber-500" />}
-                        {item.quantityInStock === 0 && <AlertTriangle size={12} className="text-red-500" />}
-                        {item.quantityInStock} {item.productUnit}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-slate-500 dark:text-slate-400">{item.reorderLevel}</td>
-                    <td className="px-4 py-3 text-right text-slate-700 dark:text-slate-200">{php(item.productPrice)}</td>
-                    <td className="px-4 py-3">
-                      <button onClick={() => { setShowAdjust(item); setAdjustForm({ type: 'in', quantity: '1', reason: '' }); }}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors">
-                        <RotateCcw size={11} /> Adjust
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit">
+        {([['list', 'Stock List', <Package size={14} />], ['history', 'All History', <History size={14} />]] as const).map(([t, label, icon]) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={clsx('flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all', tab === t ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300')}>
+            {icon}{label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'list' && (
+        <>
+          {/* Filters */}
+          <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+            <div className="relative max-w-xs">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name or SKU..." className="input pl-9 dark:bg-slate-800 dark:border-slate-600 dark:text-white dark:placeholder-slate-400" />
+            </div>
+            <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="input max-w-xs dark:bg-slate-800 dark:border-slate-600 dark:text-white">
+              <option value="">All Categories</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <div className="flex gap-2">
+              {[['', 'All'], ['low', 'Low Stock'], ['out', 'Out of Stock']].map(([v, l]) => (
+                <button key={v} onClick={() => setFilterStock(v as any)}
+                  className={clsx('px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all', filterStock === v ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-indigo-400')}>
+                  {l}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center h-48"><div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" /></div>
+          ) : (
+            <div className="card dark:bg-slate-800 dark:border-slate-700/50 overflow-hidden p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700">
+                      <th className="table-header px-4 py-3 text-left">Product</th>
+                      <th className="table-header px-4 py-3 text-left">SKU</th>
+                      <th className="table-header px-4 py-3 text-left">Category</th>
+                      <th className="table-header px-4 py-3 text-right">In Stock</th>
+                      <th className="table-header px-4 py-3 text-right">Reorder At</th>
+                      <th className="table-header px-4 py-3 text-right">Cost</th>
+                      <th className="table-header px-4 py-3 text-right">Price</th>
+                      <th className="table-header px-4 py-3 text-right">Value</th>
+                      <th className="table-header px-4 py-3 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr><td colSpan={9} className="text-center py-12 text-slate-400 dark:text-slate-500">No inventory items found</td></tr>
+                    ) : filtered.map(item => (
+                      <tr key={item.id} className={clsx('border-b border-slate-50 dark:border-slate-700/30 transition-colors', rowClass(item.quantityInStock, item.reorderLevel))}>
+                        <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{item.productName}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{item.productSku}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{item.categoryName || '—'}</td>
+                        <td className={clsx('px-4 py-3 text-right', qtyClass(item.quantityInStock, item.reorderLevel))}>
+                          <span className="flex items-center justify-end gap-1">
+                            {item.quantityInStock === 0 && <AlertTriangle size={12} className="text-red-500" />}
+                            {item.quantityInStock > 0 && item.quantityInStock <= item.reorderLevel && <TrendingDown size={12} className="text-amber-500" />}
+                            {item.quantityInStock} {item.productUnit}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-500 dark:text-slate-400">{item.reorderLevel}</td>
+                        <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{fmt(item.productCostPrice || 0)}</td>
+                        <td className="px-4 py-3 text-right text-slate-700 dark:text-slate-200">{fmt(item.productPrice || 0)}</td>
+                        <td className="px-4 py-3 text-right text-slate-700 dark:text-slate-200 font-medium">
+                          {fmt(Number(item.productCostPrice || 0) * item.quantityInStock)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => { setShowStockIn(item); setStockInForm({ quantity: '1', costPrice: item.productCostPrice || '', supplierId: '', invoiceRef: '', notes: '' }); }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors" title="Stock In">
+                              <ArrowUp size={11} />
+                            </button>
+                            <button onClick={() => { setShowStockOut(item); setStockOutForm({ quantity: '1', reason: 'Damaged', notes: '' }); }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-xs font-semibold hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors" title="Stock Out">
+                              <ArrowDown size={11} />
+                            </button>
+                            <button onClick={() => { setShowHistory(item); loadHistory(item); }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors" title="History">
+                              <History size={11} />
+                            </button>
+                            <button onClick={() => setShowEditProduct({ ...item })}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors" title="Edit">
+                              <Edit2 size={11} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === 'history' && (
+        <div className="space-y-4">
+          {/* Filter bar */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">Filter:</span>
+            {[['', 'All'], ['in', 'Stock In'], ['out', 'Stock Out'], ['sale', 'Sale'], ['adjustment', 'Adjustment']].map(([v, l]) => (
+              <button key={v} onClick={() => { setGlobalHistoryType(v); loadGlobalHistory(1, v); }}
+                className={clsx('px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all', globalHistoryType === v ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-indigo-400')}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {globalHistoryLoading ? (
+            <div className="flex items-center justify-center h-48"><div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" /></div>
+          ) : globalHistory.movements.length === 0 ? (
+            <div className="text-center py-12 text-slate-400 dark:text-slate-500">
+              <History size={32} className="mx-auto mb-3 opacity-40" />
+              <p className="text-sm">No movement records found.</p>
+            </div>
+          ) : (
+            <div className="card dark:bg-slate-800 dark:border-slate-700/50 overflow-hidden p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700">
+                      <th className="table-header px-4 py-3 text-left">Date</th>
+                      <th className="table-header px-4 py-3 text-left">Type</th>
+                      <th className="table-header px-4 py-3 text-left">Product</th>
+                      <th className="table-header px-4 py-3 text-right">Qty</th>
+                      <th className="table-header px-4 py-3 text-right">Balance</th>
+                      <th className="table-header px-4 py-3 text-left">Reference</th>
+                      <th className="table-header px-4 py-3 text-left">By</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {globalHistory.movements.map((m: any) => (
+                      <tr key={m.id} className="border-b border-slate-50 dark:border-slate-700/30 hover:bg-slate-50/50 dark:hover:bg-slate-700/20 transition-colors">
+                        <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDate(m.created_at)}</td>
+                        <td className="px-4 py-2.5">
+                          <span className={clsx('text-xs font-semibold px-2 py-0.5 rounded-full', movementTypeColor(m.type))}>
+                            {movementTypeLabel(m.type)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="font-medium text-slate-900 dark:text-white text-xs">{m.product_name ?? '—'}</div>
+                          {m.product_sku && <div className="text-slate-400 dark:text-slate-500 font-mono text-xs">{m.product_sku}</div>}
+                        </td>
+                        <td className={clsx('px-4 py-2.5 text-right font-bold text-sm', m.type === 'in' ? 'text-emerald-600 dark:text-emerald-400' : m.type === 'sale' || m.type === 'out' ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-200')}>
+                          {m.type === 'in' ? '+' : m.type === 'out' || m.type === 'sale' ? '-' : '='}{m.quantity}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-xs text-slate-500 dark:text-slate-400">
+                          {m.balance_after !== null ? m.balance_after : '—'}
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400">
+                          {m.invoice_ref && <span className="text-indigo-600 dark:text-indigo-400">{m.invoice_ref}</span>}
+                          {m.reason && !m.invoice_ref && <span>{m.reason}</span>}
+                          {m.supplier_name && <span className="block text-slate-400 dark:text-slate-500">{m.supplier_name}</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400">{m.created_by_name ?? 'System'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {globalHistory.total > globalHistory.limit && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-700/20">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    {globalHistory.total} total · Page {globalHistory.page} of {Math.ceil(globalHistory.total / globalHistory.limit)}
+                  </span>
+                  <div className="flex gap-2">
+                    <button disabled={globalHistory.page <= 1} onClick={() => loadGlobalHistory(globalHistory.page - 1)}
+                      className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-40">
+                      <ChevronLeft size={14} />
+                    </button>
+                    <button disabled={globalHistory.page >= Math.ceil(globalHistory.total / globalHistory.limit)} onClick={() => loadGlobalHistory(globalHistory.page + 1)}
+                      className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-40">
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Adjust Stock Modal */}
-      {showAdjust && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowAdjust(null)} />
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in border border-slate-100 dark:border-slate-700">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+      {/* Stock In Drawer */}
+      {showStockIn && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowStockIn(null)} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-slate-100 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800">
               <div>
-                <h3 className="font-bold text-slate-900 dark:text-white">Adjust Stock</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{showAdjust.productName}</p>
+                <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2"><ArrowUp size={16} className="text-emerald-600" /> Stock In</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{showStockIn.productName} · {showStockIn.quantityInStock} on hand</p>
               </div>
-              <div className="text-lg font-bold text-indigo-600 dark:text-indigo-400">{showAdjust.quantityInStock} on hand</div>
+              <button onClick={() => setShowStockIn(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
             </div>
-            <form onSubmit={handleAdjust} className="p-5 space-y-4">
-              <div>
-                <label className="label dark:text-slate-300">Movement Type</label>
-                <div className="flex gap-2">
-                  {[{ v: 'in', l: 'Stock In', icon: <ArrowUp size={14} /> }, { v: 'out', l: 'Stock Out', icon: <ArrowDown size={14} /> }, { v: 'adjustment', l: 'Set Qty', icon: <RotateCcw size={14} /> }].map(opt => (
-                    <button type="button" key={opt.v} onClick={() => setAdjustForm(p => ({ ...p, type: opt.v }))}
-                      className={clsx('flex-1 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-semibold border transition-all', adjustForm.type === opt.v ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600')}>
-                      {opt.icon}{opt.l}
-                    </button>
-                  ))}
+            <form onSubmit={handleStockIn} className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label dark:text-slate-300">Quantity *</label>
+                  <input required type="number" min="1" value={stockInForm.quantity} onChange={e => setStockInForm(p => ({ ...p, quantity: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                </div>
+                <div>
+                  <label className="label dark:text-slate-300">Cost Price</label>
+                  <input type="number" step="0.01" value={stockInForm.costPrice} onChange={e => setStockInForm(p => ({ ...p, costPrice: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="0.00" />
                 </div>
               </div>
               <div>
-                <label className="label dark:text-slate-300">Quantity *</label>
-                <input required type="number" min="1" value={adjustForm.quantity} onChange={e => setAdjustForm(p => ({ ...p, quantity: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                <label className="label dark:text-slate-300">Supplier</label>
+                <select value={stockInForm.supplierId} onChange={e => setStockInForm(p => ({ ...p, supplierId: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white">
+                  <option value="">None</option>
+                  {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
               </div>
               <div>
-                <label className="label dark:text-slate-300">Reason</label>
-                <input value={adjustForm.reason} onChange={e => setAdjustForm(p => ({ ...p, reason: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="e.g. Restock, Damaged, etc." />
+                <label className="label dark:text-slate-300">Invoice / Reference</label>
+                <input value={stockInForm.invoiceRef} onChange={e => setStockInForm(p => ({ ...p, invoiceRef: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="e.g. INV-2024-001" />
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">Notes</label>
+                <textarea rows={2} value={stockInForm.notes} onChange={e => setStockInForm(p => ({ ...p, notes: e.target.value }))} className="input resize-none dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
               </div>
               <div className="flex gap-3">
-                <button type="button" onClick={() => setShowAdjust(null)} className="flex-1 btn-secondary">Cancel</button>
-                <button type="submit" disabled={saving} className="flex-1 btn-primary">{saving ? 'Saving...' : 'Apply'}</button>
+                <button type="button" onClick={() => setShowStockIn(null)} className="flex-1 btn-secondary">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 btn-primary bg-emerald-600 hover:bg-emerald-700">{saving ? 'Saving...' : 'Add Stock'}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Stock Out Drawer */}
+      {showStockOut && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowStockOut(null)} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-slate-100 dark:border-slate-700">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2"><ArrowDown size={16} className="text-red-600" /> Stock Out</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{showStockOut.productName} · {showStockOut.quantityInStock} on hand</p>
+              </div>
+              <button onClick={() => setShowStockOut(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
+            </div>
+            <form onSubmit={handleStockOut} className="p-5 space-y-4">
+              <div>
+                <label className="label dark:text-slate-300">Quantity *</label>
+                <input required type="number" min="1" max={showStockOut.quantityInStock} value={stockOutForm.quantity} onChange={e => setStockOutForm(p => ({ ...p, quantity: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">Reason *</label>
+                <select required value={stockOutForm.reason} onChange={e => setStockOutForm(p => ({ ...p, reason: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white">
+                  {STOCK_OUT_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">Notes</label>
+                <textarea rows={2} value={stockOutForm.notes} onChange={e => setStockOutForm(p => ({ ...p, notes: e.target.value }))} className="input resize-none dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setShowStockOut(null)} className="flex-1 btn-secondary">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 btn-primary bg-red-600 hover:bg-red-700">{saving ? 'Saving...' : 'Remove Stock'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* History Modal */}
+      {showHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowHistory(null)} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl animate-fade-in border border-slate-100 dark:border-slate-700 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2"><History size={16} className="text-indigo-600" /> Movement History</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{showHistory.productName}</p>
+              </div>
+              <button onClick={() => setShowHistory(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              {historyLoading ? (
+                <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin" /></div>
+              ) : history.movements.length === 0 ? (
+                <p className="text-center text-slate-400 py-8">No movement history yet</p>
+              ) : (
+                <div className="space-y-2">
+                  {history.movements.map((m: any) => (
+                    <div key={m.id} className="flex items-start gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-700">
+                      <div className={clsx('mt-0.5 flex-shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full', movementTypeColor(m.type))}>
+                        {movementTypeLabel(m.type)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                            {m.type === 'in' ? '+' : m.type === 'out' ? '-' : '='}{m.quantity}
+                          </span>
+                          {m.balance_after !== null && (
+                            <span className="text-xs text-slate-400 dark:text-slate-500">Balance: {m.balance_after}</span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-x-3 mt-0.5">
+                          {m.reason && <span className="text-xs text-slate-500 dark:text-slate-400">{m.reason}</span>}
+                          {m.supplier_name && <span className="text-xs text-indigo-600 dark:text-indigo-400">{m.supplier_name}</span>}
+                          {m.invoice_ref && <span className="text-xs text-slate-400 dark:text-slate-500">Ref: {m.invoice_ref}</span>}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-slate-400 dark:text-slate-500">
+                          <span>{m.created_by_name ?? 'System'}</span>
+                          <span>·</span>
+                          <span>{fmtDate(m.created_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {history.total > history.limit && (
+              <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 dark:border-slate-700">
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Page {history.page} of {Math.ceil(history.total / history.limit)}
+                </span>
+                <div className="flex gap-2">
+                  <button disabled={history.page <= 1} onClick={() => loadHistory(showHistory, history.page - 1)}
+                    className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40">
+                    <ChevronLeft size={14} />
+                  </button>
+                  <button disabled={history.page >= Math.ceil(history.total / history.limit)} onClick={() => loadHistory(showHistory, history.page + 1)}
+                    className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40">
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -181,7 +574,7 @@ export default function Inventory() {
           <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-slate-100 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800">
               <h3 className="font-bold text-slate-900 dark:text-white">Add Product</h3>
-              <button onClick={() => setShowAddProduct(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">✕</button>
+              <button onClick={() => setShowAddProduct(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
             </div>
             <form onSubmit={handleAddProduct} className="p-5 space-y-4">
               <div>
@@ -196,7 +589,7 @@ export default function Inventory() {
                 <div>
                   <label className="label dark:text-slate-300">Unit</label>
                   <select value={productForm.unit} onChange={e => setProductForm(p => ({ ...p, unit: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white">
-                    {['piece', 'box', 'ream', 'set', 'pack', 'bottle', 'roll'].map(u => <option key={u} value={u}>{u}</option>)}
+                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
               </div>
@@ -217,9 +610,65 @@ export default function Inventory() {
                   <input type="number" step="0.01" value={productForm.costPrice} onChange={e => setProductForm(p => ({ ...p, costPrice: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="0.00" />
                 </div>
               </div>
+              <div>
+                <label className="label dark:text-slate-300">Reorder Level</label>
+                <input type="number" min="0" value={productForm.reorderLevel} onChange={e => setProductForm(p => ({ ...p, reorderLevel: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+              </div>
               <div className="flex gap-3">
                 <button type="button" onClick={() => setShowAddProduct(false)} className="flex-1 btn-secondary">Cancel</button>
                 <button type="submit" disabled={saving} className="flex-1 btn-primary">{saving ? 'Adding...' : 'Add Product'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Product Modal */}
+      {showEditProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowEditProduct(null)} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-slate-100 dark:border-slate-700">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+              <h3 className="font-bold text-slate-900 dark:text-white">Edit Product</h3>
+              <button onClick={() => setShowEditProduct(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
+            </div>
+            <form onSubmit={handleEditProduct} className="p-5 space-y-4">
+              <div>
+                <label className="label dark:text-slate-300">Product Name *</label>
+                <input required value={showEditProduct.productName} onChange={e => setShowEditProduct((p: any) => ({ ...p, productName: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">Category</label>
+                <select value={showEditProduct.categoryId ?? ''} onChange={e => setShowEditProduct((p: any) => ({ ...p, categoryId: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white">
+                  <option value="">None</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label dark:text-slate-300">Selling Price</label>
+                  <input type="number" step="0.01" value={showEditProduct.productPrice} onChange={e => setShowEditProduct((p: any) => ({ ...p, productPrice: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                </div>
+                <div>
+                  <label className="label dark:text-slate-300">Cost Price</label>
+                  <input type="number" step="0.01" value={showEditProduct.productCostPrice} onChange={e => setShowEditProduct((p: any) => ({ ...p, productCostPrice: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label dark:text-slate-300">Unit</label>
+                  <select value={showEditProduct.productUnit} onChange={e => setShowEditProduct((p: any) => ({ ...p, productUnit: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white">
+                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label dark:text-slate-300">Reorder Level</label>
+                  <input type="number" min="0" value={showEditProduct.reorderLevel} onChange={e => setShowEditProduct((p: any) => ({ ...p, reorderLevel: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setShowEditProduct(null)} className="flex-1 btn-secondary">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 btn-primary">{saving ? 'Saving...' : 'Save Changes'}</button>
               </div>
             </form>
           </div>

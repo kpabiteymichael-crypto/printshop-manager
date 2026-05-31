@@ -3,12 +3,13 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useOnline } from '../hooks/useOnline';
 import { useState, useEffect } from 'react';
-import { notificationsApi, authApi } from '../lib/api';
+import { notificationsApi, authApi, inventoryApi } from '../lib/api';
 import {
   LayoutDashboard, ShoppingCart, Printer, Package, BookOpen,
   Users, Truck, Wallet, Receipt, BarChart3, UserCog, Settings,
   Bell, LogOut, Menu, X, Sun, Moon, Wifi, WifiOff,
   ChevronRight, ChevronLeft, AlertCircle, CheckCircle, Eye, EyeOff,
+  AlertTriangle,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -65,10 +66,21 @@ export default function Layout() {
   const [profileToast, setProfileToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [showPw, setShowPw] = useState(false);
   const [offlineBanner, setOfflineBanner] = useState(false);
+  const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
+  const [showLowStockBanner, setShowLowStockBanner] = useState(false);
+  const [lowStockDismissed, setLowStockDismissed] = useState(false);
 
   useEffect(() => {
     notificationsApi.list().then(setNotifications).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!user || !['owner', 'manager', 'inventory_officer'].includes(user.role)) return;
+    inventoryApi.alerts().then((items: any[]) => {
+      setLowStockAlerts(items);
+      if (items.length > 0 && !lowStockDismissed) setShowLowStockBanner(true);
+    }).catch(() => {});
+  }, [user]);
 
   useEffect(() => {
     if (!isOnline) {
@@ -158,27 +170,41 @@ export default function Layout() {
 
       {/* Nav */}
       <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
-        {userNav.map(item => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            onClick={() => setMobileOpen(false)}
-            title={collapsed && !mobile ? item.label : undefined}
-            className={({ isActive }) => clsx(
-              'flex items-center rounded-xl text-sm font-medium transition-all duration-150 group relative',
-              collapsed && !mobile ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5',
-              isActive
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-indigo-900/40'
-                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 hover:text-slate-900 dark:hover:text-white'
-            )}
-          >
-            <span className="flex-shrink-0">{item.icon}</span>
-            {(!collapsed || mobile) && <span>{item.label}</span>}
-            {(!collapsed || mobile) && (
-              <ChevronRight size={13} className="ml-auto opacity-0 group-hover:opacity-40 transition-opacity" />
-            )}
-          </NavLink>
-        ))}
+        {userNav.map(item => {
+          const isInventory = item.to === '/inventory';
+          const badge = isInventory && lowStockAlerts.length > 0 ? lowStockAlerts.length : 0;
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={() => setMobileOpen(false)}
+              title={collapsed && !mobile ? item.label : undefined}
+              className={({ isActive }) => clsx(
+                'flex items-center rounded-xl text-sm font-medium transition-all duration-150 group relative',
+                collapsed && !mobile ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5',
+                isActive
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-indigo-900/40'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 hover:text-slate-900 dark:hover:text-white'
+              )}
+            >
+              <span className="flex-shrink-0 relative">
+                {item.icon}
+                {badge > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-500 rounded-full text-white text-[9px] flex items-center justify-center font-bold leading-none">
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
+              </span>
+              {(!collapsed || mobile) && <span>{item.label}</span>}
+              {(!collapsed || mobile) && badge > 0 && (
+                <span className="ml-auto text-[10px] font-bold bg-amber-500 text-white px-1.5 py-0.5 rounded-full">{badge}</span>
+              )}
+              {(!collapsed || mobile) && badge === 0 && (
+                <ChevronRight size={13} className="ml-auto opacity-0 group-hover:opacity-40 transition-opacity" />
+              )}
+            </NavLink>
+          );
+        })}
       </nav>
 
       {/* Logout */}
@@ -233,6 +259,20 @@ export default function Layout() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Low stock banner */}
+        {showLowStockBanner && lowStockAlerts.length > 0 && (
+          <div className="flex items-center justify-between gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
+            <div className="flex items-center gap-2 text-sm text-amber-800 dark:text-amber-300">
+              <AlertTriangle size={15} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />
+              <span className="font-semibold">{lowStockAlerts.length} item{lowStockAlerts.length > 1 ? 's' : ''} at or below reorder level:</span>
+              <span className="text-amber-700 dark:text-amber-400 truncate hidden sm:inline">{lowStockAlerts.slice(0, 3).map((i: any) => i.productName).join(', ')}{lowStockAlerts.length > 3 ? ` +${lowStockAlerts.length - 3} more` : ''}</span>
+            </div>
+            <button onClick={() => { setShowLowStockBanner(false); setLowStockDismissed(true); }} className="flex-shrink-0 p-1 rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* Offline banner */}
         {(offlineBanner || !isOnline) && (
           <div className={clsx(

@@ -77,9 +77,18 @@ export const printJobsApi = {
 
 // ─── Inventory ────────────────────────────────────────────
 export const inventoryApi = {
-  list: () => api.get('/inventory').then(r => r.data),
+  list: (params?: { category?: number; lowStock?: boolean; outOfStock?: boolean }) =>
+    api.get('/inventory', { params }).then(r => r.data),
+  alerts: () => api.get('/inventory/alerts').then(r => r.data),
   lowStock: () => api.get('/inventory/low-stock').then(r => r.data),
-  movements: (id: number) => api.get(`/inventory/${id}/movements`).then(r => r.data),
+  history: (id: number, page = 1, limit = 20) =>
+    api.get(`/inventory/${id}/history`, { params: { page, limit } }).then(r => r.data),
+  globalHistory: (page = 1, limit = 20, type?: string) =>
+    api.get('/inventory/history', { params: { page, limit, ...(type ? { type } : {}) } }).then(r => r.data),
+  stockIn: (data: { inventoryItemId: number; quantity: number; costPrice?: string; supplierId?: number; invoiceRef?: string; notes?: string }) =>
+    api.post('/inventory/stock-in', data).then(r => r.data),
+  stockOut: (data: { inventoryItemId: number; quantity: number; reason?: string; notes?: string }) =>
+    api.post('/inventory/stock-out', data).then(r => r.data),
   adjust: (data: { inventoryItemId: number; type: string; quantity: number; reason?: string }) =>
     api.post('/inventory/adjust', data).then(r => r.data),
 };
@@ -107,10 +116,16 @@ export const customersApi = {
 // ─── Suppliers ────────────────────────────────────────────
 export const suppliersApi = {
   list: () => api.get('/suppliers').then(r => r.data),
+  get: (id: number) => api.get(`/suppliers/${id}`).then(r => r.data),
   create: (data: object) => api.post('/suppliers', data).then(r => r.data),
   update: (id: number, data: object) => api.put(`/suppliers/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/suppliers/${id}`).then(r => r.data),
+  orders: (id: number) => api.get(`/suppliers/${id}/orders`).then(r => r.data),
   purchaseOrders: () => api.get('/suppliers/purchase-orders').then(r => r.data),
+  createPO: (data: object) => api.post('/suppliers/purchase-orders', data).then(r => r.data),
+  updatePOStatus: (id: number, status: string) => api.put(`/suppliers/purchase-orders/${id}/status`, { status }).then(r => r.data),
+  receivePO: (id: number, lines?: Array<{ lineItemId: number; deliveredQuantity: number }>) =>
+    api.put(`/suppliers/purchase-orders/${id}/receive`, { lines }).then(r => r.data),
 };
 
 // ─── Cash ─────────────────────────────────────────────────

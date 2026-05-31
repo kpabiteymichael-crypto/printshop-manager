@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
-import { suppliers, purchaseOrders, purchaseOrderItems, products, inventoryItems } from '../db/schema';
+import { purchaseOrders, purchaseOrderItems, suppliers, products, inventoryItems } from '../db/schema';
 import { eq, desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
@@ -9,9 +9,7 @@ import { AuthRequest } from '../middleware/auth';
 const router = Router();
 router.use(authenticate);
 
-// ── Purchase order routes (must be BEFORE /:id to avoid conflict) ───────────
-
-router.get('/purchase-orders', async (_req, res) => {
+router.get('/', async (_req, res) => {
   try {
     const pos = await db.select({
       id: purchaseOrders.id,
@@ -30,7 +28,43 @@ router.get('/purchase-orders', async (_req, res) => {
   } catch { return res.status(500).json({ error: 'Failed to fetch purchase orders' }); }
 });
 
-router.post('/purchase-orders', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {
+router.get('/:id', async (req, res) => {
+  try {
+    const po = await db.execute(sql`
+      SELECT
+        po.id, po.po_number, po.status, po.total_amount, po.notes,
+        po.ordered_at, po.expected_delivery_at, po.received_at, po.created_at,
+        s.name AS supplier_name,
+        u.name AS ordered_by_name,
+        json_agg(
+          json_build_object(
+            'id', poi.id,
+            'productId', poi.product_id,
+            'productName', p.name,
+            'productSku', p.sku,
+            'quantity', poi.quantity,
+            'unitPrice', poi.unit_price,
+            'totalPrice', poi.total_price
+          )
+        ) FILTER (WHERE poi.id IS NOT NULL) AS items
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      LEFT JOIN users u ON u.id = po.ordered_by
+      LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
+      LEFT JOIN products p ON p.id = poi.product_id
+      WHERE po.id = ${Number(req.params.id)}
+      GROUP BY po.id, s.name, u.name
+    `);
+    const rows = (po as any).rows;
+    if (!rows?.length) return res.status(404).json({ error: 'Purchase order not found' });
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch purchase order' });
+  }
+});
+
+router.post('/', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {
   try {
     const data = z.object({
       supplierId: z.number(),
@@ -45,7 +79,7 @@ router.post('/purchase-orders', authorize('owner', 'manager', 'inventory_officer
 
     const year = new Date().getFullYear();
     const countResult = await db.execute(sql`
-      SELECT COUNT(*) as count FROM purchase_orders WHERE EXTRACT(YEAR FROM created_at) = ${year}
+      SELECT COUNT(*) AS count FROM purchase_orders WHERE EXTRACT(YEAR FROM created_at) = ${year}
     `);
     const count = Number((countResult as any).rows?.[0]?.count ?? 0) + 1;
     const poNumber = `PO-${year}-${String(count).padStart(4, '0')}`;
@@ -79,7 +113,7 @@ router.post('/purchase-orders', authorize('owner', 'manager', 'inventory_officer
   }
 });
 
-router.put('/purchase-orders/:id/status', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {
+router.put('/:id/status', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {
   try {
     const { status } = z.object({ status: z.enum(['draft', 'ordered', 'partial', 'received', 'cancelled']) }).parse(req.body);
     const [po] = await db.update(purchaseOrders).set({
@@ -96,7 +130,7 @@ router.put('/purchase-orders/:id/status', authorize('owner', 'manager', 'invento
   }
 });
 
-router.put('/purchase-orders/:id/receive', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {
+router.put('/:id/receive', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {
   try {
     const poId = Number(req.params.id);
     const { lines } = z.object({
@@ -167,105 +201,6 @@ router.put('/purchase-orders/:id/receive', authorize('owner', 'manager', 'invent
     console.error(err);
     return res.status(500).json({ error: 'Failed to receive purchase order' });
   }
-});
-
-// ── Supplier CRUD ─────────────────────────────────────────────────────────────
-
-router.get('/', async (_req, res) => {
-  try {
-    const list = await db.select().from(suppliers).orderBy(desc(suppliers.createdAt));
-    return res.json(list);
-  } catch { return res.status(500).json({ error: 'Failed to fetch suppliers' }); }
-});
-
-router.get('/:id', async (req, res) => {
-  try {
-    const [s] = await db.select().from(suppliers).where(eq(suppliers.id, Number(req.params.id))).limit(1);
-    if (!s) return res.status(404).json({ error: 'Supplier not found' });
-
-    const totalSpendResult = await db.execute(sql`
-      SELECT COALESCE(SUM(total_amount), 0) as total_spend
-      FROM purchase_orders
-      WHERE supplier_id = ${Number(req.params.id)} AND status IN ('ordered', 'partial', 'received')
-    `);
-    const totalSpend = Number((totalSpendResult as any).rows?.[0]?.total_spend ?? 0);
-
-    return res.json({ ...s, totalSpend });
-  } catch { return res.status(500).json({ error: 'Failed to fetch supplier' }); }
-});
-
-router.get('/:id/orders', async (req, res) => {
-  try {
-    const pos = await db.execute(sql`
-      SELECT
-        po.id,
-        po.po_number,
-        po.status,
-        po.total_amount,
-        po.notes,
-        po.ordered_at,
-        po.expected_delivery_at,
-        po.received_at,
-        po.created_at,
-        u.name as ordered_by_name,
-        json_agg(
-          json_build_object(
-            'id', poi.id,
-            'productId', poi.product_id,
-            'productName', p.name,
-            'productSku', p.sku,
-            'quantity', poi.quantity,
-            'receivedQuantity', poi.received_quantity,
-            'unitPrice', poi.unit_price,
-            'totalPrice', poi.total_price
-          ) ORDER BY poi.id
-        ) FILTER (WHERE poi.id IS NOT NULL) as items
-      FROM purchase_orders po
-      LEFT JOIN users u ON po.ordered_by = u.id
-      LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
-      LEFT JOIN products p ON p.id = poi.product_id
-      WHERE po.supplier_id = ${Number(req.params.id)}
-      GROUP BY po.id, u.name
-      ORDER BY po.created_at DESC
-    `);
-    return res.json((pos as any).rows ?? []);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Failed to fetch supplier orders' });
-  }
-});
-
-router.post('/', authorize('owner', 'manager', 'inventory_officer'), async (req, res) => {
-  try {
-    const data = z.object({
-      name: z.string().min(1),
-      contactName: z.string().optional(),
-      email: z.string().email().optional().or(z.literal('')),
-      phone: z.string().optional(),
-      address: z.string().optional(),
-      notes: z.string().optional(),
-    }).parse(req.body);
-    const [s] = await db.insert(suppliers).values(data).returning();
-    return res.status(201).json(s);
-  } catch (err: any) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
-    return res.status(500).json({ error: 'Failed to create supplier' });
-  }
-});
-
-router.put('/:id', authorize('owner', 'manager', 'inventory_officer'), async (req, res) => {
-  try {
-    const [s] = await db.update(suppliers).set({ ...req.body, updatedAt: new Date() }).where(eq(suppliers.id, Number(req.params.id))).returning();
-    if (!s) return res.status(404).json({ error: 'Supplier not found' });
-    return res.json(s);
-  } catch { return res.status(500).json({ error: 'Failed to update supplier' }); }
-});
-
-router.delete('/:id', authorize('owner', 'manager'), async (req, res) => {
-  try {
-    await db.update(suppliers).set({ isActive: false }).where(eq(suppliers.id, Number(req.params.id)));
-    return res.json({ success: true });
-  } catch { return res.status(500).json({ error: 'Failed to delete supplier' }); }
 });
 
 export default router;

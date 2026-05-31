@@ -8,7 +8,7 @@ import { relations } from 'drizzle-orm';
 export const userRoleEnum = pgEnum('user_role', ['owner', 'manager', 'cashier', 'print_operator', 'inventory_officer']);
 export const printJobStatusEnum = pgEnum('print_job_status', ['pending', 'in_progress', 'completed', 'cancelled']);
 export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer']);
-export const movementTypeEnum = pgEnum('movement_type', ['in', 'out', 'adjustment']);
+export const movementTypeEnum = pgEnum('movement_type', ['in', 'out', 'adjustment', 'sale']);
 export const cashSessionStatusEnum = pgEnum('cash_session_status', ['open', 'closed']);
 export const poStatusEnum = pgEnum('po_status', ['draft', 'ordered', 'partial', 'received', 'cancelled']);
 
@@ -125,6 +125,10 @@ export const inventoryMovements = pgTable('inventory_movements', {
   inventoryItemId: integer('inventory_item_id').notNull().references(() => inventoryItems.id),
   type: movementTypeEnum('type').notNull(),
   quantity: integer('quantity').notNull(),
+  balanceAfter: integer('balance_after'),
+  costPrice: decimal('cost_price', { precision: 10, scale: 2 }),
+  supplierId: integer('supplier_id').references(() => suppliers.id),
+  invoiceRef: text('invoice_ref'),
   reason: text('reason'),
   referenceId: integer('reference_id'),
   referenceType: text('reference_type'),
@@ -158,6 +162,7 @@ export const purchaseOrders = pgTable('purchase_orders', {
   notes: text('notes'),
   orderedBy: integer('ordered_by').references(() => users.id),
   orderedAt: timestamp('ordered_at'),
+  expectedDeliveryAt: timestamp('expected_delivery_at'),
   receivedAt: timestamp('received_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -171,6 +176,7 @@ export const purchaseOrderItems = pgTable('purchase_order_items', {
   purchaseOrderId: integer('purchase_order_id').notNull().references(() => purchaseOrders.id, { onDelete: 'cascade' }),
   productId: integer('product_id').notNull().references(() => products.id),
   quantity: integer('quantity').notNull(),
+  receivedQuantity: integer('received_quantity').notNull().default(0),
   unitPrice: decimal('unit_price', { precision: 10, scale: 2 }).notNull(),
   totalPrice: decimal('total_price', { precision: 10, scale: 2 }).notNull(),
 }, (t) => ({
@@ -320,6 +326,22 @@ export const settings = pgTable('settings', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+// ─── Book Metadata ───────────────────────────────────────
+export const bookMetadata = pgTable('book_metadata', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+  isbn: text('isbn'),
+  author: text('author'),
+  publisher: text('publisher'),
+  subject: text('subject'),
+  educationalLevel: text('educational_level'),
+  edition: text('edition'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  productIdx: uniqueIndex('book_metadata_product_idx').on(t.productId),
+}));
+
 // ─── Relations ───────────────────────────────────────────
 export const usersRelations = relations(users, ({ many }) => ({
   notifications: many(notifications),
@@ -340,6 +362,11 @@ export const productsRelations = relations(products, ({ one, many }) => ({
   category: one(productCategories, { fields: [products.categoryId], references: [productCategories.id] }),
   inventoryItem: one(inventoryItems, { fields: [products.id], references: [inventoryItems.productId] }),
   saleItems: many(saleItems),
+  bookMetadata: one(bookMetadata, { fields: [products.id], references: [bookMetadata.productId] }),
+}));
+
+export const bookMetadataRelations = relations(bookMetadata, ({ one }) => ({
+  product: one(products, { fields: [bookMetadata.productId], references: [products.id] }),
 }));
 
 export const inventoryItemsRelations = relations(inventoryItems, ({ one, many }) => ({

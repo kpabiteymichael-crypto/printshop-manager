@@ -1,0 +1,3 @@
+- [Suppliers PO routing](suppliers-po-routing.md) — purchase-orders routes must be declared BEFORE /:id in suppliers router to avoid param capture
+- [Inventory response shape](inventory-response-shape.md) — GET /api/inventory returns object {items, totalValue, lowStockCount, outOfStockCount}, not a flat array
+- [Raw SQL result access](raw-sql-result.md) — db.execute(sql`...`) returns {rows: [...]}; access via (result as any).rows

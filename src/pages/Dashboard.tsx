@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { dashboardApi } from '../lib/api';
-import { LayoutDashboard, ShoppingCart, Printer, Package, Users, AlertTriangle, TrendingUp, Wallet } from 'lucide-react';
+import { ShoppingCart, Printer, Package, Users, AlertTriangle, TrendingUp, Wallet, BarChart2 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import clsx from 'clsx';
 
@@ -11,6 +11,9 @@ interface Summary {
   inProgressJobs: number;
   totalCustomers: number;
   lowStockItems: number;
+  outOfStockItems: number;
+  inventoryValue: number;
+  topMovingProducts: { id: number; name: string; sku: string; units_sold: number }[];
   hasOpenSession: boolean;
   openSession: any;
   monthlySales: { date: string; total: string; count: number }[];
@@ -53,10 +56,10 @@ export default function Dashboard() {
     <div className="p-6 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-2xl border border-red-200 dark:border-red-800">{error}</div>
   );
 
-  const php = (v: number) => `₱${v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmt = (v: number) => `₵${v.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const chartData = summary?.monthlySales.map(d => ({
-    date: new Date(d.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }),
+    date: new Date(d.date).toLocaleDateString('en-GH', { month: 'short', day: 'numeric' }),
     sales: parseFloat(d.total),
     orders: d.count,
   })) ?? [];
@@ -65,7 +68,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="page-title dark:text-white">Dashboard</h1>
-        <p className="page-subtitle dark:text-slate-400">Today's overview — {new Date().toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+        <p className="page-subtitle dark:text-slate-400">Today's overview — {new Date().toLocaleDateString('en-GH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
       </div>
 
       {!summary?.hasOpenSession && (
@@ -82,15 +85,15 @@ export default function Dashboard() {
         <StatCard
           icon={<ShoppingCart size={22} className="text-indigo-600" />}
           label="Today's Sales"
-          value={php(summary?.todaySales.total ?? 0)}
+          value={fmt(summary?.todaySales.total ?? 0)}
           sub={`${summary?.todaySales.count ?? 0} transactions`}
           color="bg-indigo-50 dark:bg-indigo-900/30"
         />
         <StatCard
           icon={<Wallet size={22} className="text-emerald-600" />}
           label="Net Today"
-          value={php((summary?.todaySales.total ?? 0) - (summary?.todayExpenses ?? 0))}
-          sub={`Expenses: ${php(summary?.todayExpenses ?? 0)}`}
+          value={fmt((summary?.todaySales.total ?? 0) - (summary?.todayExpenses ?? 0))}
+          sub={`Expenses: ${fmt(summary?.todayExpenses ?? 0)}`}
           color="bg-emerald-50 dark:bg-emerald-900/30"
         />
         <StatCard
@@ -102,9 +105,9 @@ export default function Dashboard() {
         />
         <StatCard
           icon={<Package size={22} className="text-red-600" />}
-          label="Low Stock Items"
-          value={summary?.lowStockItems ?? 0}
-          sub={summary?.lowStockItems ? 'Needs restocking' : 'All good'}
+          label="Stock Alerts"
+          value={(summary?.lowStockItems ?? 0) + (summary?.outOfStockItems ?? 0)}
+          sub={`${summary?.outOfStockItems ?? 0} out · ${summary?.lowStockItems ?? 0} low`}
           color="bg-red-50 dark:bg-red-900/30"
         />
       </div>
@@ -126,8 +129,8 @@ export default function Dashboard() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} />
-                <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={(v: number) => php(v)} />
+                <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={v => `₵${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v: number) => fmt(v)} />
                 <Area type="monotone" dataKey="sales" stroke="#4f46e5" strokeWidth={2} fill="url(#salesGrad)" />
               </AreaChart>
             </ResponsiveContainer>
@@ -136,23 +139,50 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="card dark:bg-slate-800 dark:border-slate-700/50">
-          <h2 className="section-title dark:text-white">Quick Stats</h2>
-          <div className="space-y-4">
-            {[
-              { label: 'Total Customers', value: summary?.totalCustomers ?? 0, icon: <Users size={16} />, color: 'text-blue-500' },
-              { label: 'Pending Print Jobs', value: summary?.pendingJobs ?? 0, icon: <Printer size={16} />, color: 'text-amber-500' },
-              { label: 'In-Progress Jobs', value: summary?.inProgressJobs ?? 0, icon: <Printer size={16} />, color: 'text-indigo-500' },
-              { label: 'Low Stock Alerts', value: summary?.lowStockItems ?? 0, icon: <Package size={16} />, color: 'text-red-500' },
-            ].map(s => (
-              <div key={s.label} className="flex items-center justify-between py-2 border-b border-slate-50 dark:border-slate-700/50 last:border-0">
-                <div className="flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300">
-                  <span className={s.color}>{s.icon}</span>
-                  {s.label}
+        <div className="space-y-4">
+          <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+            <h2 className="section-title dark:text-white">Quick Stats</h2>
+            <div className="space-y-3">
+              {[
+                { label: 'Total Customers', value: summary?.totalCustomers ?? 0, icon: <Users size={16} />, color: 'text-blue-500' },
+                { label: 'Pending Print Jobs', value: summary?.pendingJobs ?? 0, icon: <Printer size={16} />, color: 'text-amber-500' },
+                { label: 'In-Progress Jobs', value: summary?.inProgressJobs ?? 0, icon: <Printer size={16} />, color: 'text-indigo-500' },
+                { label: 'Low Stock Alerts', value: summary?.lowStockItems ?? 0, icon: <Package size={16} />, color: 'text-amber-500' },
+                { label: 'Out of Stock', value: summary?.outOfStockItems ?? 0, icon: <Package size={16} />, color: 'text-red-500' },
+              ].map(s => (
+                <div key={s.label} className="flex items-center justify-between py-1.5 border-b border-slate-50 dark:border-slate-700/50 last:border-0">
+                  <div className="flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300">
+                    <span className={s.color}>{s.icon}</span>
+                    {s.label}
+                  </div>
+                  <span className="font-bold text-slate-900 dark:text-white">{s.value}</span>
                 </div>
-                <span className="font-bold text-slate-900 dark:text-white">{s.value}</span>
+              ))}
+            </div>
+          </div>
+
+          <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="section-title mb-0 dark:text-white">Inventory Value</h2>
+              <BarChart2 size={16} className="text-slate-400" />
+            </div>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white mb-3">{fmt(summary?.inventoryValue ?? 0)}</div>
+            {(summary?.topMovingProducts ?? []).length > 0 && (
+              <div>
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Top Movers (30d)</div>
+                <div className="space-y-1.5">
+                  {(summary?.topMovingProducts ?? []).map((p, i) => (
+                    <div key={p.id} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-4 h-4 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-bold flex items-center justify-center flex-shrink-0 text-[10px]">{i + 1}</span>
+                        <span className="text-slate-700 dark:text-slate-200 truncate">{p.name}</span>
+                      </div>
+                      <span className="font-semibold text-slate-900 dark:text-white flex-shrink-0 ml-2">{Number(p.units_sold)} units</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>
