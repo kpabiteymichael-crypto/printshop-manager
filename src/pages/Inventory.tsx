@@ -1,10 +1,10 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { inventoryApi, productsApi, suppliersApi } from '../lib/api';
+import { inventoryApi, productsApi, suppliersApi, posApi } from '../lib/api';
 import {
   Package, AlertTriangle, TrendingDown, ArrowUp, ArrowDown, RotateCcw,
   Plus, Search, History, ChevronLeft, ChevronRight, X, Edit2, DollarSign,
-  ClipboardList,
+  ClipboardList, Barcode, Camera, CheckCircle, AlertCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -38,12 +38,143 @@ export default function Inventory() {
   const [productForm, setProductForm] = useState({ categoryId: '', name: '', sku: '', price: '', costPrice: '', unit: 'piece', description: '', reorderLevel: '10' });
   const [saving, setSaving] = useState(false);
 
+  // ─── Barcode scanner state ──────────────────────────────────────────────────
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [barcodeFlash, setBarcodeFlash] = useState<'success' | 'error' | null>(null);
+  const [barcodeMsg, setBarcodeMsg] = useState('');
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraSupported, setCameraSupported] = useState<boolean | null>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const drawerBarcodeInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraRafRef = useRef<number>(0);
+
   const [history, setHistory] = useState<{ movements: any[]; total: number; page: number; limit: number }>({ movements: [], total: 0, page: 1, limit: 20 });
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const [globalHistory, setGlobalHistory] = useState<{ movements: any[]; total: number; page: number; limit: number }>({ movements: [], total: 0, page: 1, limit: 20 });
   const [globalHistoryLoading, setGlobalHistoryLoading] = useState(false);
   const [globalHistoryType, setGlobalHistoryType] = useState('');
+
+  // ─── Barcode lookup ─────────────────────────────────────────────────────────
+  // Opens stock-in drawer for the scanned SKU. fromDrawer=true means we're
+  // switching products while the drawer is already open.
+  const handleBarcodeInput = useCallback(async (sku: string, fromDrawer = false) => {
+    if (!sku.trim() || barcodeLoading) return;
+    setBarcodeLoading(true);
+    setBarcodeFlash(null);
+    setBarcodeMsg('');
+    try {
+      const product = await posApi.barcodeSearch(sku.trim());
+      const invItem = data.items.find(
+        i => i.productSku === product.sku || i.productId === product.id
+      );
+      if (!invItem) {
+        setBarcodeFlash('error');
+        setBarcodeMsg(`"${product.name}" has no inventory record`);
+        setTimeout(() => { setBarcodeFlash(null); setBarcodeMsg(''); }, 3000);
+        return;
+      }
+      setBarcodeFlash('success');
+      setBarcodeMsg(`Found: ${product.name}`);
+      if (fromDrawer) {
+        // Stay in drawer, just swap the item
+        setShowStockIn(invItem);
+        setStockInForm(f => ({ ...f, costPrice: invItem.productCostPrice || '' }));
+        if (drawerBarcodeInputRef.current) drawerBarcodeInputRef.current.value = '';
+        setTimeout(() => { setBarcodeFlash(null); setBarcodeMsg(''); }, 2000);
+      } else {
+        setTimeout(() => {
+          stopCamera();
+          setShowBarcodeScanner(false);
+          setBarcodeFlash(null);
+          setBarcodeMsg('');
+          setShowStockIn(invItem);
+          setStockInForm({ quantity: '1', costPrice: invItem.productCostPrice || '', supplierId: '', invoiceRef: '', notes: '' });
+        }, 600);
+      }
+    } catch {
+      setBarcodeFlash('error');
+      setBarcodeMsg(`Barcode "${sku}" not found`);
+      setTimeout(() => { setBarcodeFlash(null); setBarcodeMsg(''); }, 3000);
+    } finally {
+      setBarcodeLoading(false);
+      if (barcodeInputRef.current) barcodeInputRef.current.value = '';
+    }
+  }, [barcodeLoading, data.items]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Camera scanning (BarcodeDetector API) ──────────────────────────────────
+  const stopCamera = useCallback(() => {
+    cancelAnimationFrame(cameraRafRef.current);
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach(t => t.stop());
+      cameraStreamRef.current = null;
+    }
+    setCameraActive(false);
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    const BarcodeDetectorClass = (window as any).BarcodeDetector;
+    const supported = typeof BarcodeDetectorClass !== 'undefined' &&
+      'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices;
+    setCameraSupported(supported);
+    if (!supported) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      cameraStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setCameraActive(true);
+
+      const detector = new BarcodeDetectorClass({
+        formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'upc_a', 'upc_e'],
+      });
+
+      let lastScan = '';
+      const detect = async () => {
+        if (!videoRef.current || !cameraStreamRef.current) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          if (codes.length > 0) {
+            const val = codes[0].rawValue;
+            if (val && val !== lastScan) {
+              lastScan = val;
+              handleBarcodeInput(val);
+            }
+          }
+        } catch { /* detection frame error — continue */ }
+        cameraRafRef.current = requestAnimationFrame(detect);
+      };
+      cameraRafRef.current = requestAnimationFrame(detect);
+    } catch {
+      setBarcodeFlash('error');
+      setBarcodeMsg('Camera access denied. Check browser permissions.');
+      setTimeout(() => { setBarcodeFlash(null); setBarcodeMsg(''); }, 4000);
+    }
+  }, [handleBarcodeInput]);
+
+  // Stop camera when scanner modal closes
+  useEffect(() => {
+    if (!showBarcodeScanner) { stopCamera(); }
+  }, [showBarcodeScanner, stopCamera]);
+
+  // Auto-focus barcode input when scanner modal opens
+  useEffect(() => {
+    if (showBarcodeScanner) {
+      // Check BarcodeDetector support for UI hint
+      const supported = typeof (window as any).BarcodeDetector !== 'undefined' &&
+        'mediaDevices' in navigator;
+      setCameraSupported(supported);
+      setTimeout(() => barcodeInputRef.current?.focus(), 50);
+    }
+  }, [showBarcodeScanner]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -203,9 +334,18 @@ export default function Inventory() {
             {data.items.length} items · {data.lowStockCount} low stock · {data.outOfStockCount} out of stock
           </p>
         </div>
-        <button onClick={() => setShowAddProduct(true)} className="btn-primary flex items-center gap-2">
-          <Plus size={16} /> Add Product
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowBarcodeScanner(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors shadow-sm"
+            title="Scan barcode to stock in"
+          >
+            <Barcode size={16} /> Scan to Stock In
+          </button>
+          <button onClick={() => setShowAddProduct(true)} className="btn-primary flex items-center gap-2">
+            <Plus size={16} /> Add Product
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -425,6 +565,136 @@ export default function Inventory() {
         </div>
       )}
 
+      {/* Barcode Scanner Modal */}
+      {showBarcodeScanner && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => { stopCamera(); setShowBarcodeScanner(false); }} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in border border-slate-100 dark:border-slate-700">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Barcode size={17} className="text-emerald-600" /> Scan to Stock In
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  USB scanner, camera, or type SKU manually
+                </p>
+              </div>
+              <button onClick={() => { stopCamera(); setShowBarcodeScanner(false); }} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Status feedback */}
+              {barcodeFlash === 'success' && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-sm font-semibold">
+                  <CheckCircle size={15} /> {barcodeMsg}
+                </div>
+              )}
+              {barcodeFlash === 'error' && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 text-sm font-semibold">
+                  <AlertCircle size={15} /> {barcodeMsg}
+                </div>
+              )}
+
+              {/* Keyboard / USB scanner input */}
+              <div>
+                <label className="label dark:text-slate-300 mb-1">Barcode / SKU</label>
+                <div className="relative">
+                  <Barcode size={15} className={clsx(
+                    'absolute left-3 top-1/2 -translate-y-1/2 transition-colors pointer-events-none',
+                    barcodeFlash === 'success' ? 'text-emerald-500' :
+                    barcodeFlash === 'error' ? 'text-red-500' : 'text-slate-400'
+                  )} />
+                  <input
+                    ref={barcodeInputRef}
+                    type="text"
+                    placeholder="Scan barcode or type SKU + Enter…"
+                    className={clsx(
+                      'input pl-9 dark:bg-slate-700 dark:border-slate-600 dark:text-white font-mono transition-all',
+                      barcodeFlash === 'success' && 'border-emerald-400 ring-1 ring-emerald-300',
+                      barcodeFlash === 'error' && 'border-red-400 ring-1 ring-red-300',
+                    )}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = (e.target as HTMLInputElement).value.trim();
+                        if (val) handleBarcodeInput(val);
+                      }
+                    }}
+                    autoComplete="off"
+                    disabled={barcodeLoading}
+                  />
+                  {barcodeLoading && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                  USB wedge scanners auto-submit on Enter. Manual entry: type SKU then press Enter.
+                </p>
+              </div>
+
+              {/* Camera scanning */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
+                {cameraActive ? (
+                  <div className="relative">
+                    <video
+                      ref={videoRef}
+                      className="w-full rounded-t-xl bg-black"
+                      style={{ maxHeight: 220, objectFit: 'cover' }}
+                      muted
+                      playsInline
+                    />
+                    {/* Scan guide overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-48 h-28 border-2 border-emerald-400 rounded-lg opacity-70" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="w-full py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <X size={12} /> Stop Camera
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={startCamera}
+                    disabled={cameraSupported === false}
+                    className={clsx(
+                      'w-full py-3.5 flex flex-col items-center gap-1.5 transition-colors',
+                      cameraSupported === false
+                        ? 'opacity-50 cursor-not-allowed bg-slate-50 dark:bg-slate-700/50'
+                        : 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                    )}
+                  >
+                    <Camera size={22} className={cameraSupported === false ? 'text-slate-400' : 'text-emerald-600 dark:text-emerald-400'} />
+                    <span className={clsx('text-xs font-semibold', cameraSupported === false ? 'text-slate-400' : 'text-emerald-700 dark:text-emerald-400')}>
+                      {cameraSupported === false ? 'Camera scan not supported in this browser' : 'Tap to scan with camera'}
+                    </span>
+                    {cameraSupported !== false && (
+                      <span className="text-xs text-slate-400 dark:text-slate-500">Uses BarcodeDetector API (Chrome / Android)</span>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => { stopCamera(); setShowBarcodeScanner(false); }}
+                className="w-full btn-secondary"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stock In Drawer */}
       {showStockIn && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
@@ -438,6 +708,49 @@ export default function Inventory() {
               <button onClick={() => setShowStockIn(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
             </div>
             <form onSubmit={handleStockIn} className="p-5 space-y-4">
+              {/* Barcode scan input — scan a different product while drawer is open */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/40 px-3 py-2.5">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Barcode size={13} className="text-emerald-600 flex-shrink-0" />
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Scan a different product</span>
+                </div>
+                <div className="relative">
+                  <input
+                    ref={drawerBarcodeInputRef}
+                    type="text"
+                    placeholder="Scan barcode or type SKU + Enter…"
+                    className={clsx(
+                      'input py-1.5 text-xs font-mono dark:bg-slate-700 dark:border-slate-600 dark:text-white transition-all',
+                      barcodeFlash === 'success' && 'border-emerald-400 ring-1 ring-emerald-300',
+                      barcodeFlash === 'error' && 'border-red-400 ring-1 ring-red-300',
+                    )}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = (e.target as HTMLInputElement).value.trim();
+                        if (val) handleBarcodeInput(val, true);
+                      }
+                    }}
+                    autoComplete="off"
+                    disabled={barcodeLoading}
+                  />
+                  {barcodeLoading && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                      <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
+                {barcodeFlash === 'success' && barcodeMsg && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                    <CheckCircle size={11} /> {barcodeMsg}
+                  </p>
+                )}
+                {barcodeFlash === 'error' && barcodeMsg && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
+                    <AlertCircle size={11} /> {barcodeMsg}
+                  </p>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label dark:text-slate-300">Quantity *</label>
