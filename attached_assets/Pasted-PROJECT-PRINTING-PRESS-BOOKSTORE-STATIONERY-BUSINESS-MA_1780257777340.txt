@@ -1,0 +1,541 @@
+PROJECT: PRINTING PRESS + BOOKSTORE + STATIONERY BUSINESS MANAGEMENT APP
+
+OBJECTIVE
+
+Build a production-ready, offline-first business management application for a Printing Press, Photocopy Center, Bookstore, and Stationery Shop.
+
+The application must run seamlessly on:
+
+- Android Phones
+- Android Tablets
+- Windows Desktop
+- Progressive Web App (PWA)
+
+The system should be optimized for small and medium businesses in Ghana and support both online and offline operation. When internet connectivity is unavailable, all transactions must continue to work locally and synchronize automatically when connectivity is restored.
+
+The application should be designed as a modular ERP combining POS, inventory, printing operations, cash management, customer management, analytics, and AI-driven business insights.
+
+====================================================
+TECHNOLOGY STACK
+====================================================
+
+Frontend:
+- Flutter (preferred)
+- Responsive UI
+- Mobile-first design
+- Tablet optimized
+- Desktop compatible
+- Light and Dark Mode
+
+Backend:
+- NestJS or Node.js + Express
+- Modular architecture
+- REST API
+- JWT Authentication
+
+Database:
+- PostgreSQL (cloud database)
+- SQLite (offline local database)
+
+Synchronization:
+- Offline-first architecture
+- Automatic background synchronization
+- Conflict resolution handling
+
+====================================================
+MODULE 1: POINT OF SALE (POS)
+====================================================
+
+Build a modern POS system capable of selling both products and services.
+
+PRODUCTS:
+- Books
+- Pens
+- Exercise Books
+- Calculators
+- Mathematical Sets
+- Stationery Items
+
+SERVICES:
+- Black & White Printing
+- Colour Printing
+- Photocopying
+- Binding
+- Laminating
+- Passport Photos
+- Graphic Design
+
+FEATURES:
+- Product search
+- Service search
+- Shopping cart
+- Discounts
+- Multiple payment methods
+- Barcode scanning
+- QR code scanning
+- Receipt generation
+- Refund processing
+- Quick checkout
+- Customer assignment to sales
+
+PAYMENT METHODS:
+- Cash
+- MTN Mobile Money
+- Telecel Cash
+- AirtelTigo Money
+- Bank Transfer
+
+====================================================
+MODULE 2: PRINTING JOB MANAGEMENT
+====================================================
+
+Create a dedicated print job workflow.
+
+Every print request must generate a unique job number.
+
+Example:
+PR-2026-0001
+
+FIELDS:
+- Job Number
+- Customer Name
+- Phone Number
+- Service Type
+- File Attachment
+- Number of Pages
+- Quantity
+- Amount
+- Assigned Operator
+- Date Created
+- Expected Completion Date
+- Payment Status
+- Delivery Status
+
+JOB STATUSES:
+- Pending
+- In Progress
+- Printed
+- Delivered
+- Completed
+- Cancelled
+
+FEATURES:
+- Print Queue
+- Job Tracking
+- Job Assignment
+- File Upload
+- Search Jobs
+- Filter by Status
+- Print Job History
+
+====================================================
+MODULE 3: BOOKSTORE MANAGEMENT
+====================================================
+
+Create a complete bookstore inventory system.
+
+BOOK FIELDS:
+- ISBN
+- Title
+- Author
+- Publisher
+- Subject
+- Educational Level
+- Cost Price
+- Selling Price
+- Quantity in Stock
+
+EDUCATIONAL LEVELS:
+- Primary
+- JHS
+- SHS
+- Tertiary
+
+SUBJECTS:
+- Mathematics
+- English
+- Science
+- Social Studies
+- Physics
+- Chemistry
+- Biology
+- Economics
+- ICT
+
+FEATURES:
+- Barcode support
+- Category filtering
+- Book search
+- Low stock alerts
+- Stock movement history
+
+====================================================
+MODULE 4: INVENTORY MANAGEMENT
+====================================================
+
+Manage all inventory categories.
+
+INVENTORY TYPES:
+
+Books
+
+Stationery:
+- Pens
+- Exercise Books
+- Pencils
+- Erasers
+- Mathematical Sets
+
+Printing Materials:
+- A4 Paper
+- A3 Paper
+- Toners
+- Ink
+- Binding Combs
+- Lamination Pouches
+
+FEATURES:
+- Stock In
+- Stock Out
+- Stock Adjustment
+- Inventory Count
+- Inventory History
+- Reorder Alerts
+- Low Stock Notifications
+
+DASHBOARD METRICS:
+- Current Stock Levels
+- Inventory Value
+- Fast Moving Items
+- Slow Moving Items
+- Out of Stock Items
+
+====================================================
+MODULE 5: SUPPLIER MANAGEMENT
+====================================================
+
+SUPPLIER FIELDS:
+- Supplier Name
+- Contact Person
+- Phone Number
+- Email
+- Location
+
+FEATURES:
+- Supplier Database
+- Purchase Orders
+- Purchase History
+- Supplier Performance
+- Outstanding Deliveries
+- Supplier Ledger
+
+====================================================
+MODULE 6: CUSTOMER MANAGEMENT
+====================================================
+
+CUSTOMER TYPES:
+- Student
+- Teacher
+- School
+- Individual
+- Business
+
+CUSTOMER FIELDS:
+- Name
+- Phone Number
+- Email
+- Address
+- Customer Type
+
+TRACK:
+- Purchase History
+- Printing History
+- Outstanding Balances
+- Loyalty Points
+
+FEATURES:
+- Customer Search
+- Customer Profile
+- Customer Statement
+- Purchase Analytics
+
+====================================================
+MODULE 7: CREDIT AND DEBT MANAGEMENT
+====================================================
+
+Allow credit sales and partial payments.
+
+FEATURES:
+- Credit Sales
+- Installment Payments
+- Debt Tracking
+- Due Dates
+- Payment History
+- Balance Tracking
+
+REPORTS:
+- Outstanding Debtors
+- Overdue Debts
+- Customer Debt Statements
+
+====================================================
+MODULE 8: CASH MANAGEMENT
+====================================================
+
+Track all incoming and outgoing money.
+
+PAYMENT CHANNELS:
+- Cash
+- MTN MoMo
+- Telecel Cash
+- AirtelTigo Money
+- Bank Transfers
+
+FEATURES:
+- Opening Cash Balance
+- Closing Cash Balance
+- Cash Reconciliation
+- Cash Drawer Management
+- Daily Cash Summary
+
+AUTOMATIC DETECTION:
+- Cash Shortages
+- Cash Overages
+
+DASHBOARD:
+- Total Cash Collected
+- Total MoMo Collected
+- Total Transfers Received
+
+====================================================
+MODULE 9: EXPENSE MANAGEMENT
+====================================================
+
+TRACK:
+- Rent
+- Salaries
+- Utilities
+- Internet
+- Transport
+- Purchases
+- Maintenance
+- Miscellaneous Expenses
+
+FEATURES:
+- Expense Categories
+- Expense Approval Workflow
+- Expense Reports
+
+CALCULATE:
+Profit = Revenue - Expenses
+
+====================================================
+MODULE 10: RECEIPTS, QUOTATIONS AND INVOICES
+====================================================
+
+GENERATE:
+
+1. Sales Receipts
+2. Quotations
+3. Invoices
+
+FEATURES:
+- Auto Numbering
+- QR Code Generation
+- PDF Export
+- WhatsApp Sharing
+- Email Sharing
+- Reprint Functionality
+
+====================================================
+MODULE 11: ANALYTICS DASHBOARD
+====================================================
+
+OWNER DASHBOARD MUST DISPLAY:
+
+SALES:
+- Today's Sales
+- Weekly Sales
+- Monthly Sales
+- Annual Sales
+
+FINANCIAL:
+- Revenue
+- Expenses
+- Profit
+- Outstanding Debts
+
+INVENTORY:
+- Inventory Value
+- Low Stock Items
+- Out of Stock Items
+
+PRINTING:
+- Pending Jobs
+- Completed Jobs
+- Revenue from Printing
+
+BOOKSTORE:
+- Best Selling Books
+- Best Selling Subjects
+
+CUSTOMERS:
+- Top Customers
+- Customer Growth
+
+====================================================
+MODULE 12: AI BUSINESS INTELLIGENCE
+====================================================
+
+Implement an AI insights engine.
+
+FORECASTING:
+
+Inventory Forecasting:
+- Paper Consumption
+- Toner Usage
+- Book Demand
+
+Revenue Forecasting:
+- Weekly Revenue Prediction
+- Monthly Revenue Prediction
+
+CUSTOMER ANALYTICS:
+- Frequent Customers
+- High Value Customers
+- Returning Customers
+
+BUSINESS RECOMMENDATIONS:
+
+Examples:
+
+"Mathematics textbooks may run out within 12 days."
+
+"Colour printing revenue increased by 18% this month."
+
+"Consider reordering A4 paper within the next 5 days."
+
+Display recommendations directly on the dashboard.
+
+====================================================
+MODULE 13: STAFF MANAGEMENT
+====================================================
+
+ROLES:
+
+OWNER
+- Full Access
+
+MANAGER
+- Operational Access
+
+CASHIER
+- Sales and Payments
+
+PRINT OPERATOR
+- Printing Jobs Only
+
+INVENTORY OFFICER
+- Inventory Management
+
+FEATURES:
+- Login System
+- Activity Tracking
+- User Permissions
+- Staff Performance Monitoring
+- Audit Logs
+
+====================================================
+REPORTS
+====================================================
+
+Generate downloadable reports:
+
+- Daily Sales Report
+- Weekly Sales Report
+- Monthly Sales Report
+- Profit and Loss Report
+- Inventory Report
+- Cash Flow Report
+- Customer Report
+- Debtors Report
+- Staff Performance Report
+- Printing Jobs Report
+
+EXPORT FORMATS:
+- PDF
+- Excel
+- CSV
+
+====================================================
+SECURITY REQUIREMENTS
+====================================================
+
+Implement:
+
+- JWT Authentication
+- Role Based Access Control
+- Secure Password Hashing
+- Database Encryption
+- Audit Trails
+- Automatic Backups
+
+LOG ALL:
+- Sales
+- Refunds
+- Stock Adjustments
+- Price Changes
+- User Activities
+
+====================================================
+UI/UX REQUIREMENTS
+====================================================
+
+Design should be modern, clean, and optimized for touch devices.
+
+REQUIREMENTS:
+
+- Mobile-first
+- Tablet-friendly
+- Fast navigation
+- Large touch buttons
+- Barcode scanner integration
+- QR scanner integration
+- Offline status indicator
+- Real-time dashboard updates
+
+====================================================
+PHASE 1 IMPLEMENTATION PRIORITY
+====================================================
+
+Build in this order:
+
+1. Authentication and User Roles
+2. POS System
+3. Inventory Management
+4. Printing Job Management
+5. Customer Management
+6. Cash Management
+7. Expense Tracking
+8. Receipts and Invoices
+9. Analytics Dashboard
+10. AI Business Insights
+
+====================================================
+EXPECTED DELIVERABLES
+====================================================
+
+Generate:
+
+1. Complete system architecture
+2. PostgreSQL database schema
+3. SQLite offline schema
+4. API documentation
+5. Flutter application source code
+6. Admin dashboard
+7. AI analytics engine
+8. Offline synchronization engine
+9. Deployment guide
+10. Production-ready build for Android, Tablet, Desktop and PWA
+
+The final product must operate as a complete business management platform for a printing press, bookstore and stationery business, capable of replacing standalone POS software, inventory software and manual bookkeeping systems.
