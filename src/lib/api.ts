@@ -68,11 +68,16 @@ export const posApi = {
 
 // ─── Print Jobs ───────────────────────────────────────────
 export const printJobsApi = {
-  list: (status?: string) => api.get('/print-jobs', { params: status ? { status } : {} }).then(r => r.data),
+  list: (params?: { status?: string; date?: string; operatorId?: number }) =>
+    api.get('/print-jobs', { params: params ?? {} }).then(r => r.data),
   get: (id: number) => api.get(`/print-jobs/${id}`).then(r => r.data),
   create: (data: object) => api.post('/print-jobs', data).then(r => r.data),
   updateStatus: (id: number, status: string) => api.patch(`/print-jobs/${id}/status`, { status }).then(r => r.data),
+  assign: (id: number, assignedTo: number | null) => api.patch(`/print-jobs/${id}/assign`, { assignedTo }).then(r => r.data),
+  operators: () => api.get('/print-jobs/operators').then(r => r.data),
   delete: (id: number) => api.delete(`/print-jobs/${id}`).then(r => r.data),
+  uploadFile: (id: number, data: { filename: string; fileData: string }) =>
+    api.post(`/print-jobs/${id}/file`, data).then(r => r.data),
 };
 
 // ─── Inventory ────────────────────────────────────────────
@@ -106,8 +111,9 @@ export const productsApi = {
 
 // ─── Customers ────────────────────────────────────────────
 export const customersApi = {
-  list: (search?: string) => api.get('/customers', { params: search ? { search } : {} }).then(r => r.data),
+  list: (params?: { search?: string; type?: string }) => api.get('/customers', { params }).then(r => r.data),
   get: (id: number) => api.get(`/customers/${id}`).then(r => r.data),
+  profile: (id: number) => api.get(`/customers/${id}/profile`).then(r => r.data),
   create: (data: object) => api.post('/customers', data).then(r => r.data),
   update: (id: number, data: object) => api.put(`/customers/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/customers/${id}`).then(r => r.data),
@@ -136,14 +142,23 @@ export const cashApi = {
     api.post('/cash/sessions/open', data).then(r => r.data),
   closeSession: (id: number, data: { closingBalance: string; notes?: string }) =>
     api.post(`/cash/sessions/${id}/close`, data).then(r => r.data),
+  sessionSummary: (id: number) => api.get(`/cash/sessions/${id}/summary`).then(r => r.data),
 };
 
 // ─── Expenses ─────────────────────────────────────────────
 export const expensesApi = {
-  list: () => api.get('/expenses').then(r => r.data),
+  list: (params?: { from?: string; to?: string; category?: string }) =>
+    api.get('/expenses', { params }).then(r => r.data),
   categories: () => api.get('/expenses/categories').then(r => r.data),
   create: (data: object) => api.post('/expenses', data).then(r => r.data),
   delete: (id: number) => api.delete(`/expenses/${id}`).then(r => r.data),
+};
+
+// ─── Debts ────────────────────────────────────────────────
+export const debtsApi = {
+  list: (status?: string) => api.get('/debts', { params: status ? { status } : {} }).then(r => r.data),
+  get: (id: number) => api.get(`/debts/${id}`).then(r => r.data),
+  addPayment: (id: number, data: object) => api.post(`/debts/${id}/payments`, data).then(r => r.data),
 };
 
 // ─── Reports ──────────────────────────────────────────────

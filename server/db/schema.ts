@@ -6,7 +6,7 @@ import { relations } from 'drizzle-orm';
 
 // ─── Enums ───────────────────────────────────────────────
 export const userRoleEnum = pgEnum('user_role', ['owner', 'manager', 'cashier', 'print_operator', 'inventory_officer']);
-export const printJobStatusEnum = pgEnum('print_job_status', ['pending', 'in_progress', 'completed', 'cancelled']);
+export const printJobStatusEnum = pgEnum('print_job_status', ['pending', 'in_progress', 'printed', 'delivered', 'completed', 'cancelled']);
 export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer']);
 export const movementTypeEnum = pgEnum('movement_type', ['in', 'out', 'adjustment', 'sale']);
 export const cashSessionStatusEnum = pgEnum('cash_session_status', ['open', 'closed']);
@@ -36,6 +36,8 @@ export const customers = pgTable('customers', {
   phone: text('phone'),
   address: text('address'),
   notes: text('notes'),
+  type: text('type').notNull().default('individual'),
+  loyaltyPoints: integer('loyalty_points').notNull().default(0),
   totalSpent: decimal('total_spent', { precision: 12, scale: 2 }).notNull().default('0'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -95,6 +97,14 @@ export const printJobs = pgTable('print_jobs', {
   unitPrice: decimal('unit_price', { precision: 10, scale: 2 }).notNull().default('0'),
   totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull().default('0'),
   notes: text('notes'),
+  pageCount: integer('page_count'),
+  fileUrl: text('file_url'),
+  filePath: text('file_path'),
+  fileName: text('file_name'),
+  fileSize: integer('file_size'),
+  fileMimeType: text('file_mime_type'),
+  fileUploadedAt: timestamp('file_uploaded_at'),
+  paymentStatus: text('payment_status').notNull().default('unpaid'),
   dueDate: timestamp('due_date'),
   completedAt: timestamp('completed_at'),
   createdBy: integer('created_by').references(() => users.id),
@@ -238,6 +248,38 @@ export const saleItems = pgTable('sale_items', {
   isRefunded: boolean('is_refunded').default(false).notNull(),
 }, (t) => ({
   saleIdx: index('sale_items_sale_idx').on(t.saleId),
+}));
+
+// ─── Debts (Credit Sales) ────────────────────────────────
+export const debts = pgTable('debts', {
+  id: serial('id').primaryKey(),
+  customerId: integer('customer_id').notNull().references(() => customers.id),
+  saleId: integer('sale_id').references(() => sales.id),
+  totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
+  paidAmount: decimal('paid_amount', { precision: 10, scale: 2 }).notNull().default('0'),
+  balance: decimal('balance', { precision: 10, scale: 2 }).notNull(),
+  dueDate: timestamp('due_date'),
+  status: text('status').notNull().default('open'),
+  notes: text('notes'),
+  createdBy: integer('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  customerIdx: index('debts_customer_idx').on(t.customerId),
+  statusIdx: index('debts_status_idx').on(t.status),
+}));
+
+export const debtPayments = pgTable('debt_payments', {
+  id: serial('id').primaryKey(),
+  debtId: integer('debt_id').notNull().references(() => debts.id, { onDelete: 'cascade' }),
+  amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
+  paymentMethod: paymentMethodEnum('payment_method').notNull().default('cash'),
+  paymentReference: text('payment_reference'),
+  paidBy: integer('paid_by').references(() => users.id),
+  paidAt: timestamp('paid_at').defaultNow().notNull(),
+  notes: text('notes'),
+}, (t) => ({
+  debtIdx: index('debt_payments_debt_idx').on(t.debtId),
 }));
 
 // ─── Expense Categories ──────────────────────────────────
@@ -417,4 +459,15 @@ export const expensesRelations = relations(expenses, ({ one }) => ({
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   user: one(users, { fields: [notifications.userId], references: [users.id] }),
+}));
+
+export const debtsRelations = relations(debts, ({ one, many }) => ({
+  customer: one(customers, { fields: [debts.customerId], references: [customers.id] }),
+  sale: one(sales, { fields: [debts.saleId], references: [sales.id] }),
+  payments: many(debtPayments),
+}));
+
+export const debtPaymentsRelations = relations(debtPayments, ({ one }) => ({
+  debt: one(debts, { fields: [debtPayments.debtId], references: [debts.id] }),
+  paidByUser: one(users, { fields: [debtPayments.paidBy], references: [users.id] }),
 }));

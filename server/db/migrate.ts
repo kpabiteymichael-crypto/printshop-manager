@@ -510,5 +510,99 @@ export async function runMigrations() {
     END $$;
   `);
 
+  // Add 'printed' and 'delivered' to print_job_status enum if not already present
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+        WHERE pg_type.typname = 'print_job_status' AND pg_enum.enumlabel = 'printed'
+      ) THEN ALTER TYPE print_job_status ADD VALUE 'printed'; END IF;
+    END $$;
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+        WHERE pg_type.typname = 'print_job_status' AND pg_enum.enumlabel = 'delivered'
+      ) THEN ALTER TYPE print_job_status ADD VALUE 'delivered'; END IF;
+    END $$;
+  `);
+
+  // Add type and loyalty_points to customers
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='customers' AND column_name='type') THEN
+        ALTER TABLE customers ADD COLUMN type TEXT NOT NULL DEFAULT 'individual';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='customers' AND column_name='loyalty_points') THEN
+        ALTER TABLE customers ADD COLUMN loyalty_points INTEGER NOT NULL DEFAULT 0;
+      END IF;
+    END $$;
+  `);
+
+  // Create debts table
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS debts (
+      id SERIAL PRIMARY KEY,
+      customer_id INTEGER NOT NULL REFERENCES customers(id),
+      sale_id INTEGER REFERENCES sales(id),
+      total_amount DECIMAL(10,2) NOT NULL,
+      paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+      balance DECIMAL(10,2) NOT NULL,
+      due_date TIMESTAMP,
+      status TEXT NOT NULL DEFAULT 'open',
+      notes TEXT,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS debts_customer_idx ON debts(customer_id);
+    CREATE INDEX IF NOT EXISTS debts_status_idx ON debts(status);
+  `);
+
+  // Create debt_payments table
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS debt_payments (
+      id SERIAL PRIMARY KEY,
+      debt_id INTEGER NOT NULL REFERENCES debts(id) ON DELETE CASCADE,
+      amount DECIMAL(10,2) NOT NULL,
+      payment_method payment_method NOT NULL DEFAULT 'cash',
+      payment_reference TEXT,
+      paid_by INTEGER REFERENCES users(id),
+      paid_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      notes TEXT
+    );
+    CREATE INDEX IF NOT EXISTS debt_payments_debt_idx ON debt_payments(debt_id);
+  `);
+
+  // Add pageCount, fileUrl, paymentStatus, and file metadata to print_jobs
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='print_jobs' AND column_name='page_count') THEN
+        ALTER TABLE print_jobs ADD COLUMN page_count INTEGER;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='print_jobs' AND column_name='file_url') THEN
+        ALTER TABLE print_jobs ADD COLUMN file_url TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='print_jobs' AND column_name='payment_status') THEN
+        ALTER TABLE print_jobs ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unpaid';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='print_jobs' AND column_name='file_path') THEN
+        ALTER TABLE print_jobs ADD COLUMN file_path TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='print_jobs' AND column_name='file_name') THEN
+        ALTER TABLE print_jobs ADD COLUMN file_name TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='print_jobs' AND column_name='file_size') THEN
+        ALTER TABLE print_jobs ADD COLUMN file_size INTEGER;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='print_jobs' AND column_name='file_mime_type') THEN
+        ALTER TABLE print_jobs ADD COLUMN file_mime_type TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='print_jobs' AND column_name='file_uploaded_at') THEN
+        ALTER TABLE print_jobs ADD COLUMN file_uploaded_at TIMESTAMP;
+      END IF;
+    END $$;
+  `);
+
   console.log('Migrations completed successfully!');
 }
+// This is appended at import time — actual additions are inline below

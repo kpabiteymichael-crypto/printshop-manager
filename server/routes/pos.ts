@@ -3,7 +3,7 @@ import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
 import {
   sales, saleItems, products, services, inventoryItems, inventoryMovements,
-  cashSessions, customers, receipts, users,
+  cashSessions, customers, receipts, users, debts,
 } from '../db/schema';
 import { eq, sql, and, ilike, or } from 'drizzle-orm';
 import { z } from 'zod';
@@ -119,8 +119,14 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
       totalAmount: z.string(),
       paymentMethod: z.enum(['cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer']).default('cash'),
       paymentReference: z.string().optional(),
+      isCredit: z.boolean().optional(),
+      creditDueDate: z.string().optional(),
       notes: z.string().optional(),
     }).parse(req.body);
+
+    if (data.isCredit && !data.customerId) {
+      return res.status(400).json({ error: 'Credit sales require a customer to be selected.' });
+    }
 
     // Validate stock for product items (outside transaction — reads only)
     // Also build inventory map for movement logging later
@@ -161,7 +167,7 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
         totalAmount: data.totalAmount,
         paymentMethod: data.paymentMethod,
         paymentReference: data.paymentReference,
-        paymentStatus: 'paid',
+        paymentStatus: data.isCredit ? 'credit' : 'paid',
         notes: data.notes,
       }).returning();
 
@@ -187,6 +193,20 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
         }
       }
 
+      // Create debt record for credit sales
+      if (data.isCredit && data.customerId) {
+        await tx.insert(debts).values({
+          customerId: data.customerId,
+          saleId: sale.id,
+          totalAmount: data.totalAmount,
+          paidAmount: '0',
+          balance: data.totalAmount,
+          dueDate: data.creditDueDate ? new Date(data.creditDueDate) : undefined,
+          status: 'open',
+          createdBy: req.user!.id,
+        });
+      }
+
       // Update customer total spent
       if (data.customerId) {
         await tx.update(customers)
@@ -194,8 +214,8 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
           .where(eq(customers.id, data.customerId));
       }
 
-      // Update cash session totals
-      if (data.cashSessionId) {
+      // Update cash session totals — credit sales collect no cash, exclude them
+      if (data.cashSessionId && !data.isCredit) {
         await tx.update(cashSessions)
           .set({ totalSales: sql`total_sales + ${parseFloat(data.totalAmount)}` })
           .where(eq(cashSessions.id, data.cashSessionId));
@@ -306,8 +326,9 @@ router.post('/sales/:id/refund', authorize('owner', 'manager', 'cashier'), async
         await tx.update(sales).set({ isRefunded: true } as any).where(eq(sales.id, saleId));
       }
 
-      // Update cash session totals
-      if (sale.cashSessionId) {
+      // Only reverse session cash totals for sales that actually collected cash
+      // Credit sales were never added to totalSales, so do not subtract them here
+      if (sale.cashSessionId && sale.paymentStatus !== 'credit') {
         await tx.update(cashSessions)
           .set({ totalSales: sql`total_sales - ${refundTotal}` })
           .where(eq(cashSessions.id, sale.cashSessionId));

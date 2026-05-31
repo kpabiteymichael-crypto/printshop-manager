@@ -64,6 +64,15 @@ router.get('/summary', authenticate, authorize('owner', 'manager'), async (_req,
     const [openSession] = await db.select().from(cashSessions)
       .where(eq(cashSessions.status, 'open')).limit(1);
 
+    const weekAgo = new Date(today.getTime() - 7 * 86400000);
+    const [weekExpenses] = await db.select({
+      total: sql<string>`COALESCE(SUM(amount), 0)`,
+    }).from(expenses).where(gte(expenses.expenseDate, weekAgo));
+
+    const [weekRevenue] = await db.select({
+      total: sql<string>`COALESCE(SUM(total_amount), 0)`,
+    }).from(sales).where(gte(sales.createdAt, weekAgo));
+
     const thirtyDaysAgo = new Date(today.getTime() - 30 * 86400000);
     const monthlySales = await db.select({
       date: sql<string>`DATE(created_at)`,
@@ -73,6 +82,33 @@ router.get('/summary', authenticate, authorize('owner', 'manager'), async (_req,
       .where(gte(sales.createdAt, thirtyDaysAgo))
       .groupBy(sql`DATE(created_at)`)
       .orderBy(sql`DATE(created_at)`);
+
+    const thirtyDaysAgoExpenses = new Date(today.getTime() - 30 * 86400000);
+    const [monthExpenses] = await db.select({
+      total: sql<string>`COALESCE(SUM(amount), 0)`,
+    }).from(expenses).where(gte(expenses.expenseDate, thirtyDaysAgo));
+
+    const [monthRevenue] = await db.select({
+      total: sql<string>`COALESCE(SUM(total_amount), 0)`,
+    }).from(sales).where(gte(sales.createdAt, thirtyDaysAgo));
+
+    const profitData = {
+      today: {
+        revenue: parseFloat(salesToday.total),
+        expenses: parseFloat(expensesToday.total),
+        profit: parseFloat(salesToday.total) - parseFloat(expensesToday.total),
+      },
+      week: {
+        revenue: parseFloat(weekRevenue.total),
+        expenses: parseFloat(weekExpenses.total),
+        profit: parseFloat(weekRevenue.total) - parseFloat(weekExpenses.total),
+      },
+      month: {
+        revenue: parseFloat(monthRevenue.total),
+        expenses: parseFloat(monthExpenses.total),
+        profit: parseFloat(monthRevenue.total) - parseFloat(monthExpenses.total),
+      },
+    };
 
     return res.json({
       todaySales: { count: Number(salesToday.count), total: parseFloat(salesToday.total) },
@@ -87,6 +123,7 @@ router.get('/summary', authenticate, authorize('owner', 'manager'), async (_req,
       hasOpenSession: !!openSession,
       openSession: openSession || null,
       monthlySales,
+      profit: profitData,
     });
   } catch (err) {
     console.error(err);

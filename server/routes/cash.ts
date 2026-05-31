@@ -67,19 +67,75 @@ router.post('/sessions/:id/close', authorize('owner', 'manager', 'cashier'), asy
       notes: z.string().optional(),
     }).parse(req.body);
 
+    const sessionId = Number(req.params.id);
+    const channelBreakdown = await db.execute(sql`
+      SELECT payment_method, COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count
+      FROM sales WHERE cash_session_id = ${sessionId} AND payment_status != 'credit'
+      GROUP BY payment_method
+    `);
+
+    const totalSalesResult = await db.execute(sql`
+      SELECT COALESCE(SUM(total_amount), 0) as total
+      FROM sales WHERE cash_session_id = ${sessionId} AND payment_status != 'credit'
+    `);
+    const totalExpensesResult = await db.execute(sql`
+      SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE cash_session_id = ${sessionId}
+    `);
+
+    const totalSales = (totalSalesResult as any).rows?.[0]?.total ?? '0';
+    const totalExpenses = (totalExpensesResult as any).rows?.[0]?.total ?? '0';
+
     const [session] = await db.update(cashSessions).set({
       closedBy: req.user!.id,
       closingBalance,
+      totalSales,
+      totalExpenses,
       status: 'closed',
       closedAt: new Date(),
       notes: notes || undefined,
-    }).where(eq(cashSessions.id, Number(req.params.id))).returning();
+    }).where(eq(cashSessions.id, sessionId)).returning();
 
     if (!session) return res.status(404).json({ error: 'Session not found' });
-    return res.json(session);
+    return res.json({ ...session, channelBreakdown: (channelBreakdown as any).rows ?? [] });
   } catch (err: any) {
     if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
     return res.status(500).json({ error: 'Failed to close cash session' });
+  }
+});
+
+router.get('/sessions/:id/summary', async (req, res) => {
+  try {
+    const sessionId = Number(req.params.id);
+    const channelBreakdown = await db.execute(sql`
+      SELECT payment_method, COALESCE(SUM(total_amount), 0) as total, COUNT(*) as txn_count
+      FROM sales WHERE cash_session_id = ${sessionId} AND payment_status != 'credit'
+      GROUP BY payment_method
+      ORDER BY total DESC
+    `);
+
+    const recentTxns = await db.execute(sql`
+      SELECT s.id, s.sale_number, s.total_amount, s.payment_method, s.payment_status, s.created_at,
+             c.name as customer_name
+      FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE s.cash_session_id = ${sessionId}
+      ORDER BY s.created_at DESC LIMIT 20
+    `);
+
+    const expenseBreakdown = await db.execute(sql`
+      SELECT ec.name as category, COALESCE(SUM(e.amount), 0) as total
+      FROM expenses e LEFT JOIN expense_categories ec ON ec.id = e.category_id
+      WHERE e.cash_session_id = ${sessionId}
+      GROUP BY ec.name ORDER BY total DESC
+    `);
+
+    return res.json({
+      channelBreakdown: (channelBreakdown as any).rows ?? [],
+      recentTransactions: (recentTxns as any).rows ?? [],
+      expenseBreakdown: (expenseBreakdown as any).rows ?? [],
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch session summary' });
   }
 });
 

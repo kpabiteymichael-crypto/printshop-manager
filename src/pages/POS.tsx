@@ -53,6 +53,7 @@ interface Customer {
 }
 
 type PaymentMethod = 'cash' | 'mtn_momo' | 'telecel_cash' | 'airteltigo' | 'bank_transfer';
+type ModalPaymentMethod = PaymentMethod | 'credit';
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string; color: string; requiresRef: boolean }[] = [
   { value: 'cash',         label: 'Cash',            color: 'bg-emerald-500', requiresRef: false },
@@ -60,6 +61,15 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string; color: string; req
   { value: 'telecel_cash', label: 'Telecel Cash',     color: 'bg-red-500',     requiresRef: true  },
   { value: 'airteltigo',   label: 'AirtelTigo Money', color: 'bg-blue-500',    requiresRef: true  },
   { value: 'bank_transfer',label: 'Bank Transfer',    color: 'bg-indigo-600',  requiresRef: true  },
+];
+
+const ALL_MODAL_METHODS: { value: ModalPaymentMethod; label: string; color: string }[] = [
+  { value: 'cash',         label: 'Cash',               color: 'bg-emerald-500' },
+  { value: 'mtn_momo',     label: 'MTN MoMo',           color: 'bg-yellow-400'  },
+  { value: 'telecel_cash', label: 'Telecel Cash',        color: 'bg-red-500'     },
+  { value: 'airteltigo',   label: 'AirtelTigo Money',    color: 'bg-blue-500'    },
+  { value: 'bank_transfer',label: 'Bank Transfer',       color: 'bg-indigo-600'  },
+  { value: 'credit',       label: 'Pay Later (Credit)',  color: 'bg-orange-500'  },
 ];
 
 const CURRENCY = 'GH₵';
@@ -79,7 +89,7 @@ function ReceiptOverlay({
     saleNumber: string;
     cashierName: string;
     customerName?: string;
-    paymentMethod: PaymentMethod;
+    paymentMethod: PaymentMethod | 'credit';
     paymentReference?: string;
     amountTendered?: number;
     items: CartItem[];
@@ -92,7 +102,9 @@ function ReceiptOverlay({
   shopAddress: string;
   onClose: () => void;
 }) {
-  const methodLabel = PAYMENT_METHODS.find(m => m.value === data.paymentMethod)?.label ?? data.paymentMethod;
+  const methodLabel = data.paymentMethod === 'credit'
+    ? 'Pay Later (Credit)'
+    : PAYMENT_METHODS.find(m => m.value === data.paymentMethod)?.label ?? data.paymentMethod;
   const change = data.amountTendered ? Math.max(0, data.amountTendered - data.total) : 0;
   const receiptUrl = `${window.location.origin}/receipt/${data.receiptNumber}`;
 
@@ -254,7 +266,7 @@ function CustomerModal({
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const list = await customersApi.list(search || undefined);
+        const list = await customersApi.list({ search: search || undefined });
         setResults(list.slice(0, 20));
       } catch { setResults([]); }
       finally { setLoading(false); }
@@ -574,32 +586,42 @@ function RefundModal({ onClose }: { onClose: () => void }) {
 // ─── Payment Modal ────────────────────────────────────────────────────────────
 function PaymentModal({
   total,
+  hasCustomer,
   onConfirm,
   onClose,
 }: {
   total: number;
-  onConfirm: (method: PaymentMethod, reference: string, amountTendered: number) => void;
+  hasCustomer: boolean;
+  onConfirm: (method: PaymentMethod, reference: string, amountTendered: number, creditDueDate?: string) => void;
   onClose: () => void;
 }) {
-  const [method, setMethod] = useState<PaymentMethod>('cash');
+  const [method, setMethod] = useState<ModalPaymentMethod>('cash');
   const [reference, setReference] = useState('');
   const [amountTendered, setAmountTendered] = useState('');
+  const [creditDueDate, setCreditDueDate] = useState('');
 
-  const selectedMethod = PAYMENT_METHODS.find(m => m.value === method)!;
+  const isCredit = method === 'credit';
+  const selectedMethod = PAYMENT_METHODS.find(m => m.value === method);
   const tendered = parseFloat(amountTendered) || 0;
   const change = Math.max(0, tendered - total);
-  const canConfirm = method === 'cash'
+  const canConfirm = isCredit
+    ? hasCustomer && creditDueDate.length > 0
+    : method === 'cash'
     ? tendered >= total
-    : !selectedMethod.requiresRef || reference.trim().length > 0;
+    : !selectedMethod?.requiresRef || reference.trim().length > 0;
 
   const handleConfirm = () => {
     if (!canConfirm) return;
-    onConfirm(method, reference.trim(), tendered);
+    if (isCredit) {
+      onConfirm('cash', '', 0, creditDueDate);
+    } else {
+      onConfirm(method as PaymentMethod, reference.trim(), tendered);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-100 dark:border-slate-700">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-100 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
           <h3 className="font-bold text-slate-900 dark:text-white">Payment</h3>
           <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
@@ -616,10 +638,10 @@ function PaymentModal({
           <div>
             <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Payment Method</label>
             <div className="grid grid-cols-1 gap-2 mt-2">
-              {PAYMENT_METHODS.map(m => (
+              {ALL_MODAL_METHODS.map(m => (
                 <button
                   key={m.value}
-                  onClick={() => { setMethod(m.value); setReference(''); setAmountTendered(''); }}
+                  onClick={() => { setMethod(m.value); setReference(''); setAmountTendered(''); setCreditDueDate(''); }}
                   className={clsx(
                     'flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-sm font-semibold transition-all text-left',
                     method === m.value
@@ -634,6 +656,32 @@ function PaymentModal({
               ))}
             </div>
           </div>
+
+          {/* Credit sale: due date + customer warning */}
+          {isCredit && (
+            <div className="space-y-3">
+              {!hasCustomer && (
+                <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2.5 text-xs text-amber-700 dark:text-amber-300 font-medium">
+                  <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+                  A customer must be selected for credit sales.
+                </div>
+              )}
+              <div>
+                <label className="label dark:text-slate-300 text-xs">Repayment Due Date *</label>
+                <input
+                  type="date"
+                  value={creditDueDate}
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={e => setCreditDueDate(e.target.value)}
+                  className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                  autoFocus
+                />
+              </div>
+              <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl px-3 py-2.5 text-xs text-orange-700 dark:text-orange-300">
+                A debt record will be created automatically and tracked under the customer's profile.
+              </div>
+            </div>
+          )}
 
           {/* Cash: amount tendered & change */}
           {method === 'cash' && (
@@ -661,7 +709,7 @@ function PaymentModal({
           )}
 
           {/* Mobile money / bank: reference number */}
-          {method !== 'cash' && selectedMethod.requiresRef && (
+          {!isCredit && method !== 'cash' && selectedMethod?.requiresRef && (
             <div>
               <label className="label dark:text-slate-300 text-xs">Transaction Reference / ID</label>
               <input
@@ -682,13 +730,17 @@ function PaymentModal({
             className={clsx(
               'w-full py-3.5 rounded-xl font-bold text-base transition-all',
               canConfirm
-                ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200 dark:shadow-indigo-900/40'
+                ? isCredit
+                  ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-md'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200 dark:shadow-indigo-900/40'
                 : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
             )}
           >
-            {method === 'cash' && tendered < total && tendered > 0
+            {isCredit
+              ? (hasCustomer ? 'Record Credit Sale' : 'Select a customer first')
+              : method === 'cash' && tendered < total && tendered > 0
               ? `Need ${CURRENCY}${fmt(total - tendered)} more`
-              : `Confirm Payment`}
+              : 'Confirm Payment'}
           </button>
         </div>
       </div>
@@ -902,7 +954,12 @@ export default function POS() {
     .filter(s => !search || s.name.toLowerCase().includes(search.toLowerCase()) || (s.description || '').toLowerCase().includes(search.toLowerCase()));
 
   // ─── Checkout ──────────────────────────────────────────────────────────────
-  const handlePaymentConfirm = async (method: PaymentMethod, reference: string, amountTendered: number) => {
+  const handlePaymentConfirm = async (method: PaymentMethod, reference: string, amountTendered: number, creditDueDate?: string) => {
+    const isCredit = !!creditDueDate;
+    if (isCredit && !customer) {
+      showToast('error', 'Credit sales require a customer.');
+      return;
+    }
     setShowPaymentModal(false);
     setProcessing(true);
     try {
@@ -924,6 +981,8 @@ export default function POS() {
         totalAmount: String(total),
         paymentMethod: method,
         paymentReference: reference || undefined,
+        isCredit,
+        creditDueDate: creditDueDate || undefined,
       });
 
       setReceipt({
@@ -931,9 +990,9 @@ export default function POS() {
         saleNumber: result.saleNumber,
         cashierName: result.cashierName ?? user?.name ?? 'Cashier',
         customerName: customer?.name,
-        paymentMethod: method,
+        paymentMethod: isCredit ? 'credit' : method,
         paymentReference: reference || undefined,
-        amountTendered,
+        amountTendered: isCredit ? 0 : amountTendered,
         items: cart,
         subtotal,
         discountAmount,
@@ -989,6 +1048,7 @@ export default function POS() {
       {showPaymentModal && (
         <PaymentModal
           total={total}
+          hasCustomer={!!customer}
           onConfirm={handlePaymentConfirm}
           onClose={() => setShowPaymentModal(false)}
         />

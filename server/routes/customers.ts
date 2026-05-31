@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
-import { customers } from '../db/schema';
-import { eq, ilike, sql } from 'drizzle-orm';
+import { customers, sales, printJobs, debts } from '../db/schema';
+import { eq, ilike, sql, desc } from 'drizzle-orm';
 import { z } from 'zod';
 
 const router = Router();
@@ -14,17 +14,81 @@ const customerSchema = z.object({
   phone: z.string().optional(),
   address: z.string().optional(),
   notes: z.string().optional(),
+  type: z.enum(['individual', 'student', 'teacher', 'school', 'business']).optional(),
 });
 
 router.get('/', async (req, res) => {
   try {
     const search = req.query.search as string | undefined;
-    let query = db.select().from(customers);
+    const type = req.query.type as string | undefined;
+    let results = await db.select().from(customers).orderBy(desc(customers.createdAt));
     if (search) {
-      return res.json(await db.select().from(customers).where(ilike(customers.name, `%${search}%`)));
+      const s = search.toLowerCase();
+      results = results.filter(c =>
+        c.name.toLowerCase().includes(s) ||
+        c.phone?.includes(search) ||
+        c.email?.toLowerCase().includes(s)
+      );
     }
-    return res.json(await query);
+    if (type && type !== 'all') {
+      results = results.filter(c => c.type === type);
+    }
+    return res.json(results);
   } catch { return res.status(500).json({ error: 'Failed to fetch customers' }); }
+});
+
+router.get('/:id/profile', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [customer] = await db.select().from(customers).where(eq(customers.id, id)).limit(1);
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
+    const customerSales = await db.execute(sql`
+      SELECT s.id, s.sale_number, s.total_amount, s.payment_method, s.payment_status, s.created_at,
+             u.name as cashier_name
+      FROM sales s
+      LEFT JOIN users u ON u.id = s.cashier_id
+      WHERE s.customer_id = ${id}
+      ORDER BY s.created_at DESC
+      LIMIT 50
+    `);
+
+    const customerJobs = await db.execute(sql`
+      SELECT pj.id, pj.job_number, pj.title, pj.status, pj.total_amount, pj.due_date, pj.created_at,
+             u.name as operator_name, sv.name as service_name
+      FROM print_jobs pj
+      LEFT JOIN users u ON u.id = pj.assigned_to
+      LEFT JOIN services sv ON sv.id = pj.service_id
+      WHERE pj.customer_id = ${id}
+      ORDER BY pj.created_at DESC
+      LIMIT 50
+    `);
+
+    const customerDebts = await db.execute(sql`
+      SELECT d.id, d.total_amount, d.paid_amount, d.balance, d.due_date, d.status, d.created_at,
+             s.sale_number
+      FROM debts d
+      LEFT JOIN sales s ON s.id = d.sale_id
+      WHERE d.customer_id = ${id}
+      ORDER BY d.created_at DESC
+    `);
+
+    const debtSummaryResult = await db.execute(sql`
+      SELECT COALESCE(SUM(balance), 0) as outstanding_balance
+      FROM debts WHERE customer_id = ${id} AND status != 'paid'
+    `);
+
+    return res.json({
+      ...customer,
+      recentSales: (customerSales as any).rows ?? [],
+      printJobs: (customerJobs as any).rows ?? [],
+      debts: (customerDebts as any).rows ?? [],
+      outstandingBalance: (debtSummaryResult as any).rows?.[0]?.outstanding_balance ?? 0,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch customer profile' });
+  }
 });
 
 router.get('/:id', async (req, res) => {

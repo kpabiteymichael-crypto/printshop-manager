@@ -31,6 +31,7 @@ import reportsRoutes from './routes/reports';
 import productsRoutes from './routes/products';
 import settingsRoutes from './routes/settings';
 import notificationRoutes from './routes/notifications';
+import debtsRoutes from './routes/debts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -162,6 +163,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/products', productsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/debts', debtsRoutes);
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads')));
 

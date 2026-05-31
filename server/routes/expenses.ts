@@ -16,7 +16,8 @@ router.get('/categories', async (_req, res) => {
 
 router.get('/', async (req, res) => {
   try {
-    const list = await db.select({
+    const { from, to, category } = req.query as { from?: string; to?: string; category?: string };
+    let list = await db.select({
       id: expenses.id,
       description: expenses.description,
       amount: expenses.amount,
@@ -25,6 +26,7 @@ router.get('/', async (req, res) => {
       expenseDate: expenses.expenseDate,
       notes: expenses.notes,
       createdAt: expenses.createdAt,
+      categoryId: expenses.categoryId,
       categoryName: expenseCategories.name,
       recordedByName: users.name,
     })
@@ -32,6 +34,19 @@ router.get('/', async (req, res) => {
       .leftJoin(expenseCategories, eq(expenses.categoryId, expenseCategories.id))
       .leftJoin(users, eq(expenses.recordedBy, users.id))
       .orderBy(desc(expenses.expenseDate));
+
+    if (from) {
+      const fromDate = new Date(from);
+      list = list.filter(e => new Date(e.expenseDate) >= fromDate);
+    }
+    if (to) {
+      const toDate = new Date(to);
+      toDate.setHours(23, 59, 59, 999);
+      list = list.filter(e => new Date(e.expenseDate) <= toDate);
+    }
+    if (category && category !== 'all') {
+      list = list.filter(e => String(e.categoryId) === category);
+    }
     return res.json(list);
   } catch { return res.status(500).json({ error: 'Failed to fetch expenses' }); }
 });

@@ -18,6 +18,7 @@ const Expenses      = lazy(() => import('./pages/Expenses'));
 const Reports       = lazy(() => import('./pages/Reports'));
 const Staff         = lazy(() => import('./pages/Staff'));
 const Settings      = lazy(() => import('./pages/Settings'));
+const Debts         = lazy(() => import('./pages/Debts'));
 
 function PageLoader() {
   return (
@@ -114,6 +115,12 @@ export default function App() {
                 <Route path="expenses" element={
                   <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
                     <Suspense fallback={<PageLoader />}><Expenses /></Suspense>
+                  </ProtectedRoute>
+                } />
+
+                <Route path="debts" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><Debts /></Suspense>
                   </ProtectedRoute>
                 } />
 

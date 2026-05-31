@@ -7,7 +7,7 @@ import { notificationsApi, authApi, inventoryApi } from '../lib/api';
 import {
   LayoutDashboard, ShoppingCart, Printer, Package, BookOpen,
   Users, Truck, Wallet, Receipt, BarChart3, UserCog, Settings,
-  Bell, LogOut, Menu, X, Sun, Moon, Wifi, WifiOff,
+  CreditCard, Bell, LogOut, Menu, X, Sun, Moon, Wifi, WifiOff,
   ChevronRight, ChevronLeft, AlertCircle, CheckCircle, Eye, EyeOff,
   AlertTriangle,
 } from 'lucide-react';
@@ -30,6 +30,7 @@ const navItems: NavItem[] = [
   { label: 'Suppliers',   to: '/suppliers',  icon: <Truck size={18} />,           roles: ['owner', 'manager', 'inventory_officer'] },
   { label: 'Cash',        to: '/cash',       icon: <Wallet size={18} />,          roles: ['owner', 'manager', 'cashier'] },
   { label: 'Expenses',    to: '/expenses',   icon: <Receipt size={18} />,         roles: ['owner', 'manager', 'cashier'] },
+  { label: 'Debts',       to: '/debts',      icon: <CreditCard size={18} />,      roles: ['owner', 'manager', 'cashier'] },
   { label: 'Reports',     to: '/reports',    icon: <BarChart3 size={18} />,       roles: ['owner', 'manager'] },
   { label: 'Staff',       to: '/staff',      icon: <UserCog size={18} />,         roles: ['owner'] },
   { label: 'Settings',    to: '/settings',   icon: <Settings size={18} />,        roles: ['owner', 'manager'] },
