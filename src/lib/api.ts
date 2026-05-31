@@ -210,7 +210,7 @@ export const reportsApi = {
   printJobsSummary: () => api.get('/reports/print-jobs-summary').then(r => r.data),
   generate: (type: string, from?: string, to?: string) =>
     api.get(`/reports/${type}`, { params: { from, to } }).then(r => r.data),
-  exportUrl: (type: string, from?: string, to?: string, format: 'csv' | 'xlsx' = 'csv') =>
+  exportUrl: (type: string, from?: string, to?: string, format: 'csv' | 'xlsx' | 'pdf' = 'csv') =>
     `/api/reports/${type}/export?format=${format}${from ? `&from=${from}` : ''}${to ? `&to=${to}` : ''}`,
 };
 
