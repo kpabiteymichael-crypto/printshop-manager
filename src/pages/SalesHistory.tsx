@@ -5,6 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import {
   ShoppingBag, Search, Printer, X, ChevronDown, Filter,
   RefreshCw, Eye, AlertCircle, User, Calendar, CreditCard,
+  RotateCcw, CheckCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -173,22 +174,172 @@ function openPrintWindow(
   setTimeout(() => { w.print(); }, 400);
 }
 
+// ─── Refund Modal ─────────────────────────────────────────────────────────────
+function RefundModal({
+  sale,
+  onClose,
+  onSuccess,
+}: {
+  sale: SaleDetail;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const refundableItems = sale.items.filter(i => !i.isRefunded);
+  const [selected, setSelected] = useState<number[]>(refundableItems.map(i => i.id));
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState<any>(null);
+
+  const refundTotal = refundableItems
+    .filter(i => selected.includes(i.id))
+    .reduce((sum, i) => sum + parseFloat(i.totalPrice), 0);
+
+  const toggle = (id: number) =>
+    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const handleRefund = async () => {
+    if (selected.length === 0) return;
+    setProcessing(true);
+    setError('');
+    try {
+      const res = await posApi.refund(sale.id, selected);
+      setDone(res);
+    } catch (err: any) {
+      setError(err.message || 'Refund failed');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-100 dark:border-slate-700">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+          <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <RotateCcw size={16} /> Process Refund
+          </h3>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {error && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-xl text-sm border border-red-200 dark:border-red-800">
+              <AlertCircle size={14} /> {error}
+            </div>
+          )}
+
+          {done ? (
+            <div className="space-y-4">
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                  <CheckCircle size={24} className="text-emerald-600" />
+                </div>
+                <div className="text-center">
+                  <div className="font-bold text-slate-900 dark:text-white">Refund Processed</div>
+                  <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    {CURRENCY}{fmt(parseFloat(done.refundTotal))} refunded for {done.refundedItems} item(s)
+                  </div>
+                  <div className="mt-2 font-mono text-xs text-indigo-600 dark:text-indigo-400">{done.refundReceiptNumber}</div>
+                </div>
+              </div>
+              <button onClick={onSuccess} className="btn-primary w-full">Done</button>
+            </div>
+          ) : (
+            <>
+              <div className="bg-slate-50 dark:bg-slate-700/40 rounded-xl p-3 text-sm space-y-1">
+                <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                  <span>Sale</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">{sale.saleNumber}</span>
+                </div>
+                {sale.customerName && (
+                  <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                    <span>Customer</span><span>{sale.customerName}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                  <span>Total Paid</span>
+                  <span className="font-bold text-slate-900 dark:text-white">{CURRENCY}{fmt(parseFloat(sale.totalAmount))}</span>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Select items to refund</p>
+                {refundableItems.length === 0 ? (
+                  <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-4">All items have already been refunded.</p>
+                ) : (
+                  <div className="space-y-1 max-h-52 overflow-y-auto">
+                    {refundableItems.map(item => (
+                      <label key={item.id} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/40 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(item.id)}
+                          onChange={() => toggle(item.id)}
+                          className="rounded border-slate-300 text-indigo-600"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-slate-900 dark:text-white truncate">{item.description}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            {item.quantity} × {CURRENCY}{fmt(parseFloat(item.unitPrice))}
+                          </div>
+                        </div>
+                        <span className="text-sm font-semibold text-slate-900 dark:text-white">{CURRENCY}{fmt(parseFloat(item.totalPrice))}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {selected.length > 0 && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-3 flex justify-between items-center border border-amber-200 dark:border-amber-800">
+                  <span className="text-sm font-medium text-amber-700 dark:text-amber-400">Refund Amount</span>
+                  <span className="text-lg font-bold text-amber-700 dark:text-amber-400">{CURRENCY}{fmt(refundTotal)}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button onClick={onClose} className="flex-1 btn-secondary dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">Cancel</button>
+                <button
+                  onClick={handleRefund}
+                  disabled={selected.length === 0 || processing || refundableItems.length === 0}
+                  className="flex-1 btn-primary bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {processing
+                    ? <span className="flex items-center justify-center gap-2"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processing…</span>
+                    : `Refund ${selected.length} item${selected.length !== 1 ? 's' : ''}`
+                  }
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SaleDetailModal({
   saleId,
   shopName,
   shopAddress,
   shopPhone,
+  canRefund,
   onClose,
+  onRefunded,
 }: {
   saleId: number;
   shopName: string;
   shopAddress: string;
   shopPhone: string;
+  canRefund: boolean;
   onClose: () => void;
+  onRefunded: () => void;
 }) {
   const [sale, setSale] = useState<SaleDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showRefund, setShowRefund] = useState(false);
 
   useEffect(() => {
     posApi.getSale(saleId)
@@ -237,13 +388,21 @@ function SaleDetailModal({
               <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">{sale.receiptNumber}</p>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => openPrintWindow(sale, shopName, shopAddress, shopPhone)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors"
             >
-              <Printer size={13} /> Print Receipt
+              <Printer size={13} /> Print
             </button>
+            {canRefund && sale.paymentStatus !== 'refunded' && sale.items.some(i => !i.isRefunded) && (
+              <button
+                onClick={() => setShowRefund(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white text-xs font-semibold rounded-lg hover:bg-amber-600 transition-colors"
+              >
+                <RotateCcw size={13} /> Refund
+              </button>
+            )}
             <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
               <X size={18} />
             </button>
@@ -351,6 +510,18 @@ function SaleDetailModal({
           </div>
         </div>
       </div>
+
+      {showRefund && (
+        <RefundModal
+          sale={sale}
+          onClose={() => setShowRefund(false)}
+          onSuccess={() => {
+            setShowRefund(false);
+            onRefunded();
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -642,7 +813,9 @@ export default function SalesHistory() {
           shopName={shopName}
           shopAddress={shopAddress}
           shopPhone={shopPhone}
+          canRefund={user?.role === 'owner' || user?.role === 'manager'}
           onClose={() => setSelectedSaleId(null)}
+          onRefunded={() => { setSelectedSaleId(null); fetchSales(); }}
         />
       )}
     </div>
