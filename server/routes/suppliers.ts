@@ -16,9 +16,12 @@ router.get('/purchase-orders', async (_req, res) => {
     const pos = await db.select({
       id: purchaseOrders.id,
       poNumber: purchaseOrders.poNumber,
+      supplierId: purchaseOrders.supplierId,
       status: purchaseOrders.status,
       totalAmount: purchaseOrders.totalAmount,
+      notes: purchaseOrders.notes,
       orderedAt: purchaseOrders.orderedAt,
+      expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
       receivedAt: purchaseOrders.receivedAt,
       createdAt: purchaseOrders.createdAt,
       supplierName: suppliers.name,
@@ -28,6 +31,67 @@ router.get('/purchase-orders', async (_req, res) => {
       .orderBy(desc(purchaseOrders.createdAt));
     return res.json(pos);
   } catch { return res.status(500).json({ error: 'Failed to fetch purchase orders' }); }
+});
+
+router.get('/purchase-orders/:id', async (req, res) => {
+  try {
+    const poId = Number(req.params.id);
+    const result = await db.execute(sql`
+      SELECT
+        po.id,
+        po.po_number,
+        po.supplier_id,
+        po.status,
+        po.total_amount,
+        po.notes,
+        po.ordered_at,
+        po.expected_delivery_at,
+        po.received_at,
+        po.created_at,
+        s.name as supplier_name,
+        u.name as ordered_by_name,
+        json_agg(
+          json_build_object(
+            'id', poi.id,
+            'productId', poi.product_id,
+            'productName', p.name,
+            'productSku', p.sku,
+            'quantity', poi.quantity,
+            'receivedQuantity', poi.received_quantity,
+            'unitPrice', poi.unit_price,
+            'totalPrice', poi.total_price
+          ) ORDER BY poi.id
+        ) FILTER (WHERE poi.id IS NOT NULL) as items
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON po.supplier_id = s.id
+      LEFT JOIN users u ON po.ordered_by = u.id
+      LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
+      LEFT JOIN products p ON p.id = poi.product_id
+      WHERE po.id = ${poId}
+      GROUP BY po.id, s.name, u.name
+    `);
+    const rows = (result as any).rows ?? [];
+    if (rows.length === 0) return res.status(404).json({ error: 'Purchase order not found' });
+    const row = rows[0];
+    return res.json({
+      id: row.id,
+      poNumber: row.po_number,
+      supplierId: row.supplier_id,
+      status: row.status,
+      totalAmount: row.total_amount,
+      notes: row.notes,
+      orderedAt: row.ordered_at,
+      expectedDeliveryAt: row.expected_delivery_at,
+      receivedAt: row.received_at,
+      createdAt: row.created_at,
+      supplierName: row.supplier_name,
+      orderedByName: row.ordered_by_name,
+      items: row.items ?? [],
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch purchase order' });
+  }
 });
 
 router.post('/purchase-orders', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {

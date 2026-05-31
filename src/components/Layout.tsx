@@ -9,7 +9,7 @@ import {
   Users, Truck, Wallet, Receipt, BarChart3, UserCog, Settings,
   CreditCard, Bell, LogOut, Menu, X, Sun, Moon, Wifi, WifiOff,
   ChevronRight, ChevronLeft, AlertCircle, CheckCircle, Eye, EyeOff,
-  AlertTriangle, FileText, BookMarked, ShoppingBag,
+  AlertTriangle, FileText, BookMarked, ShoppingBag, ClipboardList,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -27,7 +27,8 @@ const navItems: NavItem[] = [
   { label: 'Inventory',   to: '/inventory',  icon: <Package size={18} />,         roles: ['owner', 'manager', 'inventory_officer'] },
   { label: 'Bookstore',   to: '/bookstore',  icon: <BookOpen size={18} />,        roles: ['owner', 'manager', 'inventory_officer', 'cashier'] },
   { label: 'Customers',   to: '/customers',  icon: <Users size={18} />,           roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Suppliers',   to: '/suppliers',  icon: <Truck size={18} />,           roles: ['owner', 'manager', 'inventory_officer'] },
+  { label: 'Suppliers',      to: '/suppliers',       icon: <Truck size={18} />,         roles: ['owner', 'manager', 'inventory_officer'] },
+  { label: 'Purchase Orders', to: '/purchase-orders', icon: <ClipboardList size={18} />, roles: ['owner', 'manager', 'inventory_officer'] },
   { label: 'Cash',        to: '/cash',       icon: <Wallet size={18} />,          roles: ['owner', 'manager', 'cashier'] },
   { label: 'Expenses',    to: '/expenses',   icon: <Receipt size={18} />,         roles: ['owner', 'manager', 'cashier'] },
   { label: 'Debts',       to: '/debts',      icon: <CreditCard size={18} />,      roles: ['owner', 'manager', 'cashier'] },

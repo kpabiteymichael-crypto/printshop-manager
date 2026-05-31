@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { inventoryApi, productsApi, suppliersApi } from '../lib/api';
 import {
   Package, AlertTriangle, TrendingDown, ArrowUp, ArrowDown, RotateCcw,
   Plus, Search, History, ChevronLeft, ChevronRight, X, Edit2, DollarSign,
+  ClipboardList,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -15,6 +17,7 @@ const UNITS = ['piece', 'box', 'ream', 'set', 'pack', 'bottle', 'roll', 'book'];
 type Tab = 'list' | 'history';
 
 export default function Inventory() {
+  const navigate = useNavigate();
   const [data, setData] = useState<{ items: any[]; totalValue: number; lowStockCount: number; outOfStockCount: number }>({ items: [], totalValue: 0, lowStockCount: 0, outOfStockCount: 0 });
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('list');
@@ -315,6 +318,14 @@ export default function Inventory() {
                               className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors" title="Edit">
                               <Edit2 size={11} />
                             </button>
+                            {(item.quantityInStock <= item.reorderLevel) && (
+                              <button
+                                onClick={() => navigate(`/purchase-orders?new=1&productId=${item.productId}`)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-xs font-semibold hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
+                                title="Create Purchase Order">
+                                <ClipboardList size={11} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

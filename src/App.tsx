@@ -22,7 +22,8 @@ const Debts         = lazy(() => import('./pages/Debts'));
 const Receipts      = lazy(() => import('./pages/Receipts'));
 const SalesHistory  = lazy(() => import('./pages/SalesHistory'));
 const Quotations    = lazy(() => import('./pages/Quotations'));
-const Invoices      = lazy(() => import('./pages/Invoices'));
+const Invoices        = lazy(() => import('./pages/Invoices'));
+const PurchaseOrders  = lazy(() => import('./pages/PurchaseOrders'));
 
 function PageLoader() {
   return (
@@ -107,6 +108,12 @@ export default function App() {
                 <Route path="suppliers" element={
                   <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']}>
                     <Suspense fallback={<PageLoader />}><Suppliers /></Suspense>
+                  </ProtectedRoute>
+                } />
+
+                <Route path="purchase-orders" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']}>
+                    <Suspense fallback={<PageLoader />}><PurchaseOrders /></Suspense>
                   </ProtectedRoute>
                 } />
 

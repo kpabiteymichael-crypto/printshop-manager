@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { dashboardApi, analyticsApi } from '../lib/api';
 import {
   ShoppingCart, Printer, Package, Users, AlertTriangle, TrendingUp,
@@ -120,6 +121,7 @@ function ProfitCard({ profit }: { profit: any }) {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<any>(null);
   const [revenueTrend, setRevenueTrend] = useState<any[]>([]);
   const [financialSummary, setFinancialSummary] = useState<any[]>([]);
@@ -193,17 +195,25 @@ export default function Dashboard() {
           { icon: <Wallet size={18} className="text-emerald-600" />, label: 'Monthly Revenue', value: fmt(summary?.profit?.month?.revenue ?? 0), sub: 'this month', color: 'bg-emerald-50 dark:bg-emerald-900/30' },
           { icon: <DollarSign size={18} className="text-purple-600" />, label: 'Net Profit', value: fmt(summary?.profit?.month?.profit ?? 0), sub: 'this month', color: 'bg-purple-50 dark:bg-purple-900/30' },
           { icon: <Printer size={18} className="text-orange-600" />, label: 'Print Jobs', value: (summary?.inProgressJobs ?? 0) + (summary?.pendingJobs ?? 0), sub: 'active', color: 'bg-orange-50 dark:bg-orange-900/30' },
-          { icon: <Package size={18} className="text-red-600" />, label: 'Inv. Value', value: fmt(summary?.inventoryValue ?? 0), sub: `${(summary?.lowStockItems ?? 0)} low stock`, color: 'bg-red-50 dark:bg-red-900/30' },
+          { icon: <Package size={18} className="text-red-600" />, label: 'Inv. Value', value: fmt(summary?.inventoryValue ?? 0), sub: `${(summary?.lowStockItems ?? 0)} low stock`, color: 'bg-red-50 dark:bg-red-900/30', onClick: (summary?.lowStockItems ?? 0) > 0 ? () => navigate('/purchase-orders?new=1') : undefined },
           { icon: <CreditCard size={18} className="text-rose-600" />, label: 'Outstanding Debts', value: fmt(summary?.outstandingDebts ?? 0), sub: 'open credit balance', color: 'bg-rose-50 dark:bg-rose-900/30' },
         ].map(c => (
-          <div key={c.label} className="card dark:bg-slate-800 dark:border-slate-700/50 flex items-start gap-3 p-4">
+          <div
+            key={c.label}
+            onClick={(c as any).onClick}
+            className={clsx('card dark:bg-slate-800 dark:border-slate-700/50 flex items-start gap-3 p-4', (c as any).onClick && 'cursor-pointer hover:shadow-md hover:border-indigo-200 dark:hover:border-indigo-700 transition-shadow')}
+          >
             <div className={clsx('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0', c.color)}>
               {c.icon}
             </div>
             <div className="min-w-0">
               <div className="text-lg font-bold text-slate-900 dark:text-white leading-tight truncate">{c.value}</div>
               <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">{c.label}</div>
-              {c.sub && <div className="text-[11px] text-slate-400 dark:text-slate-500">{c.sub}</div>}
+              {c.sub && (
+                <div className={clsx('text-[11px]', (c as any).onClick ? 'text-indigo-500 dark:text-indigo-400 font-semibold underline-offset-1' : 'text-slate-400 dark:text-slate-500')}>
+                  {c.sub}{(c as any).onClick ? ' →' : ''}
+                </div>
+              )}
             </div>
           </div>
         ))}

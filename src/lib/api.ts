@@ -129,6 +129,7 @@ export const suppliersApi = {
   delete: (id: number) => api.delete(`/suppliers/${id}`).then(r => r.data),
   orders: (id: number) => api.get(`/suppliers/${id}/orders`).then(r => r.data),
   purchaseOrders: () => api.get('/suppliers/purchase-orders').then(r => r.data),
+  getPO: (id: number) => api.get(`/suppliers/purchase-orders/${id}`).then(r => r.data),
   createPO: (data: object) => api.post('/suppliers/purchase-orders', data).then(r => r.data),
   updatePOStatus: (id: number, status: string) => api.put(`/suppliers/purchase-orders/${id}/status`, { status }).then(r => r.data),
   receivePO: (id: number, lines?: Array<{ lineItemId: number; deliveredQuantity: number }>) =>
