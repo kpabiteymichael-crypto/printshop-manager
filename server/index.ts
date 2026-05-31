@@ -12,29 +12,24 @@ dotenv.config();
 import logger from './lib/logger';
 import { sanitizeInput, requestLogger } from './middleware/sanitize';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { auditLog } from './middleware/auditLog';
 import { runMigrations } from './db/migrate';
 import { db } from './db/index';
 import { sql } from 'drizzle-orm';
 
 import authRoutes from './routes/auth';
-import studentRoutes from './routes/students';
-import scoreRoutes from './routes/scores';
-import rankingRoutes from './routes/rankings';
-import gamificationRoutes from './routes/gamification';
-import analyticsRoutes from './routes/analytics';
-import predictionRoutes from './routes/predictions';
-import parentRoutes from './routes/parents';
-import reportRoutes from './routes/reports';
-import notificationRoutes from './routes/notifications';
+import dashboardRoutes from './routes/dashboard';
+import posRoutes from './routes/pos';
+import printJobRoutes from './routes/print-jobs';
+import inventoryRoutes from './routes/inventory';
+import customersRoutes from './routes/customers';
+import suppliersRoutes from './routes/suppliers';
+import cashRoutes from './routes/cash';
+import expensesRoutes from './routes/expenses';
+import reportsRoutes from './routes/reports';
+import productsRoutes from './routes/products';
 import settingsRoutes from './routes/settings';
-import classRoutes from './routes/classes';
-import assessmentRoutes from './routes/assessments';
-import publicRoutes from './routes/public';
-import questionBankRoutes from './routes/question-bank';
-import lmsRoutes from './routes/lms';
-import announcementRoutes from './routes/announcements';
-import mentorRoutes from './routes/mentors';
-import subjectAssignmentRoutes from './routes/subject-assignments';
+import notificationRoutes from './routes/notifications';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,13 +39,11 @@ const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 3000 :
 
 app.set('trust proxy', 1);
 
-// ── Security headers ────────────────────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
 }));
 
-// ── CORS ────────────────────────────────────────────────────────────────────
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : true;
@@ -62,7 +55,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// ── Compression ─────────────────────────────────────────────────────────────
 app.use(compression({
   filter: (req, res) => {
     if (req.headers['x-no-compression']) return false;
@@ -71,10 +63,9 @@ app.use(compression({
   level: 6,
 }));
 
-// ── Rate limiting ────────────────────────────────────────────────────────────
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 500,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
@@ -89,55 +80,54 @@ const authLimiter = rateLimit({
 });
 
 app.use('/api', limiter);
-
-// ── Body parsing ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// ── Input sanitization ───────────────────────────────────────────────────────
 app.use(sanitizeInput);
-
-// ── Request logging ──────────────────────────────────────────────────────────
 app.use(requestLogger);
 
-// ── Manual seed trigger (protected by secret) ────────────────────────────────
-app.post('/api/admin/seed', async (req, res) => {
-  const secret = req.headers['x-seed-secret'] || req.query.secret;
-  const expectedSecret = process.env.SEED_SECRET || 'edu-seed-2024';
-  if (secret !== expectedSecret) {
-    return res.status(401).json({ error: 'Invalid seed secret' });
+// ── Seed endpoints (non-production only) ──────────────────────────────────────
+const seedSecret = process.env.SEED_SECRET;
+if (!seedSecret) {
+  if (process.env.NODE_ENV === 'production') {
+    logger.warn('SEED_SECRET not set — seed endpoints disabled in production');
+  } else {
+    logger.warn('[WARNING] SEED_SECRET is not set. Seed endpoints disabled. Set SEED_SECRET to enable them.');
   }
-  try {
-    const { seedDatabase } = await import('./db/seed.js');
-    await seedDatabase();
-    res.json({ success: true, message: 'Database seeded successfully' });
-  } catch (err) {
-    logger.error('Seed failed', { error: (err as Error).message });
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
+}
 
-// Force-seed endpoint: wipes users and re-seeds (use only on empty/broken DB)
-app.post('/api/admin/force-seed', async (req, res) => {
-  const secret = req.headers['x-seed-secret'] || req.query.secret;
-  const expectedSecret = process.env.SEED_SECRET || 'edu-seed-2024';
-  if (secret !== expectedSecret) {
-    return res.status(401).json({ error: 'Invalid seed secret' });
-  }
-  try {
-    // Delete in dependency order so foreign keys don't block
-    await db.execute(sql`TRUNCATE TABLE notifications, parent_links, predictions, activity_logs, rankings, student_badges, scores, students, class_subjects, classes, badges, users RESTART IDENTITY CASCADE`);
-    logger.info('Tables truncated, re-seeding...');
-    const { seedDatabase } = await import('./db/seed.js');
-    await seedDatabase();
-    res.json({ success: true, message: 'Database force-seeded successfully' });
-  } catch (err) {
-    logger.error('Force-seed failed', { error: (err as Error).message });
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
+if (seedSecret && process.env.NODE_ENV !== 'production') {
+  app.post('/api/admin/seed', async (req, res) => {
+    const secret = req.headers['x-seed-secret'] || req.query.secret;
+    if (secret !== seedSecret) return res.status(401).json({ error: 'Invalid seed secret' });
+    try {
+      const { seedDatabase } = await import('./db/seed.js');
+      await seedDatabase();
+      res.json({ success: true, message: 'Database seeded successfully' });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
 
-// ── Health check (before auth) ───────────────────────────────────────────────
+  app.post('/api/admin/force-seed', async (req, res) => {
+    const secret = req.headers['x-seed-secret'] || req.query.secret;
+    if (secret !== seedSecret) return res.status(401).json({ error: 'Invalid seed secret' });
+    try {
+      await db.execute(sql`
+        TRUNCATE TABLE notifications, staff_activity, audit_logs, receipts, expenses, expense_categories,
+        sale_items, sales, cash_sessions, purchase_order_items, purchase_orders, suppliers,
+        inventory_movements, inventory_items, print_jobs, services, products, product_categories,
+        customers, settings, users RESTART IDENTITY CASCADE
+      `);
+      const { seedDatabase } = await import('./db/seed.js');
+      await seedDatabase();
+      res.json({ success: true, message: 'Database force-seeded successfully' });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+}
+
+// ── Health check ─────────────────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
   const startTime = Date.now();
   try {
@@ -151,61 +141,43 @@ app.get('/api/health', async (_req, res) => {
       responseTimeMs: Date.now() - startTime,
     });
   } catch (err) {
-    res.status(503).json({
-      status: 'degraded',
-      timestamp: new Date().toISOString(),
-      db: 'disconnected',
-      error: (err as Error).message,
-    });
+    res.status(503).json({ status: 'degraded', db: 'disconnected', error: (err as Error).message });
   }
 });
 
-// ── API routes ───────────────────────────────────────────────────────────────
+// ── API routes ────────────────────────────────────────────────────────────────
+app.use('/api', auditLog);
 app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/students', studentRoutes);
-app.use('/api/scores', scoreRoutes);
-app.use('/api/rankings', rankingRoutes);
-app.use('/api/gamification', gamificationRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/predictions', predictionRoutes);
-app.use('/api/parents', parentRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/notifications', notificationRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/pos', posRoutes);
+app.use('/api/print-jobs', printJobRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/customers', customersRoutes);
+app.use('/api/suppliers', suppliersRoutes);
+app.use('/api/cash', cashRoutes);
+app.use('/api/expenses', expensesRoutes);
+app.use('/api/reports', reportsRoutes);
+app.use('/api/products', productsRoutes);
 app.use('/api/settings', settingsRoutes);
-app.use('/api/classes', classRoutes);
-app.use('/api/assessments', assessmentRoutes);
-app.use('/api/public', publicRoutes);
-app.use('/api/question-bank', questionBankRoutes);
-app.use('/api/lms', lmsRoutes);
-app.use('/api/announcements', announcementRoutes);
-app.use('/api/mentors', mentorRoutes);
-app.use('/api/subject-assignments', subjectAssignmentRoutes);
+app.use('/api/notifications', notificationRoutes);
 
-// ── Uploaded files (always served) ───────────────────────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads')));
 
-// ── Static files in production ───────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.join(process.cwd(), 'dist/client');
   app.use(express.static(distPath, {
     maxAge: '1y',
     etag: true,
     setHeaders: (res, filePath) => {
-      if (filePath.endsWith('index.html')) {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      }
+      if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     },
   }));
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
+  app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }
 
-// ── 404 & centralized error handler ─────────────────────────────────────────
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-// ── Server startup ───────────────────────────────────────────────────────────
 async function start() {
   try {
     await runMigrations();
@@ -219,26 +191,18 @@ async function start() {
     }
 
     app.listen(PORT, () => {
-      logger.info(`API Server running on http://localhost:${PORT}`, {
+      logger.info(`PrintShop API running on http://localhost:${PORT}`, {
         port: PORT,
         env: process.env.NODE_ENV || 'development',
       });
     });
   } catch (err) {
-    logger.error('Failed to start server', { error: (err as Error).message, stack: (err as Error).stack });
+    logger.error('Failed to start server', { error: (err as Error).message });
     process.exit(1);
   }
 }
 
-// ── Graceful shutdown ────────────────────────────────────────────────────────
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received. Shutting down gracefully...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received. Shutting down...');
-  process.exit(0);
-});
+process.on('SIGTERM', () => { logger.info('SIGTERM received. Shutting down...'); process.exit(0); });
+process.on('SIGINT', () => { logger.info('SIGINT received. Shutting down...'); process.exit(0); });
 
 start();

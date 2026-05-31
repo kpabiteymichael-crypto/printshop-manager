@@ -6,18 +6,106 @@ dotenv.config();
 export async function runMigrations() {
   console.log('Running database migrations...');
 
+  // Drop old EduAnalytics schema — only runs if the legacy `students` table
+  // still exists. Once cleaned up, this entire block becomes a no-op so
+  // subsequent server restarts never touch the new PrintShop data.
   await db.execute(sql`
     DO $$ BEGIN
-      CREATE TYPE user_role AS ENUM ('admin', 'teacher', 'student', 'parent');
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = 'students' AND table_schema = 'public'
+      ) THEN
+        DROP TABLE IF EXISTS mentor_ratings CASCADE;
+        DROP TABLE IF EXISTS mentor_sessions CASCADE;
+        DROP TABLE IF EXISTS mentor_requests CASCADE;
+        DROP TABLE IF EXISTS teacher_subjects CASCADE;
+        DROP TABLE IF EXISTS student_subjects CASCADE;
+        DROP TABLE IF EXISTS announcements CASCADE;
+        DROP TABLE IF EXISTS lesson_progress CASCADE;
+        DROP TABLE IF EXISTS learning_materials CASCADE;
+        DROP TABLE IF EXISTS topics CASCADE;
+        DROP TABLE IF EXISTS submission_answers CASCADE;
+        DROP TABLE IF EXISTS submissions CASCADE;
+        DROP TABLE IF EXISTS question_options CASCADE;
+        DROP TABLE IF EXISTS questions CASCADE;
+        DROP TABLE IF EXISTS question_bank CASCADE;
+        DROP TABLE IF EXISTS assessments CASCADE;
+        DROP TABLE IF EXISTS password_reset_tokens CASCADE;
+        DROP TABLE IF EXISTS class_subjects CASCADE;
+        DROP TABLE IF EXISTS notifications CASCADE;
+        DROP TABLE IF EXISTS activity_logs CASCADE;
+        DROP TABLE IF EXISTS parent_links CASCADE;
+        DROP TABLE IF EXISTS predictions CASCADE;
+        DROP TABLE IF EXISTS rankings CASCADE;
+        DROP TABLE IF EXISTS student_badges CASCADE;
+        DROP TABLE IF EXISTS badges CASCADE;
+        DROP TABLE IF EXISTS scores CASCADE;
+        DROP TABLE IF EXISTS students CASCADE;
+        DROP TABLE IF EXISTS classes CASCADE;
+        DROP TABLE IF EXISTS settings CASCADE;
+      END IF;
+    END $$;
+  `);
+
+  // Drop old enums — only drop user_role if it contains old EduAnalytics values
+  // (student, teacher, admin, parent). If it already has PrintShop values, keep it
+  // so the users table and its role column remain intact.
+  await db.execute(sql`
+    DO $$ BEGIN
+      -- Drop old EduAnalytics-specific enums unconditionally (tables already gone)
+      DROP TYPE IF EXISTS subject CASCADE;
+      DROP TYPE IF EXISTS badge_category CASCADE;
+      DROP TYPE IF EXISTS risk_level CASCADE;
+
+      -- Only drop/replace user_role if it still has old EduAnalytics labels
+      IF EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'user_role'
+          AND e.enumlabel IN ('student', 'teacher', 'admin', 'parent')
+      ) THEN
+        DROP TABLE IF EXISTS users CASCADE;
+        DROP TYPE user_role;
+      END IF;
+    END $$;
+  `);
+
+  // Repair: add role column back to users table if it was dropped by CASCADE
+  // (this handles the case where a previous migration run removed it)
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = 'users' AND table_schema = 'public'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'users' AND column_name = 'role'
+      ) THEN
+        -- users table exists but role column is missing — drop and recreate
+        DROP TABLE users CASCADE;
+      END IF;
+    END $$;
+  `);
+
+  // Create new enums
+  await db.execute(sql`
+    DO $$ BEGIN
+      CREATE TYPE user_role AS ENUM ('owner', 'manager', 'cashier', 'print_operator', 'inventory_officer');
     EXCEPTION WHEN duplicate_object THEN null; END $$;
     DO $$ BEGIN
-      CREATE TYPE subject AS ENUM ('math', 'science', 'english', 'history', 'art', 'pe', 'ict', 'music');
+      CREATE TYPE print_job_status AS ENUM ('pending', 'in_progress', 'completed', 'cancelled');
     EXCEPTION WHEN duplicate_object THEN null; END $$;
     DO $$ BEGIN
-      CREATE TYPE badge_category AS ENUM ('academic', 'streak', 'improvement', 'social', 'milestone');
+      CREATE TYPE payment_method AS ENUM ('cash', 'card', 'transfer', 'gcash', 'maya', 'credit');
     EXCEPTION WHEN duplicate_object THEN null; END $$;
     DO $$ BEGIN
-      CREATE TYPE risk_level AS ENUM ('low', 'medium', 'high', 'critical');
+      CREATE TYPE movement_type AS ENUM ('in', 'out', 'adjustment');
+    EXCEPTION WHEN duplicate_object THEN null; END $$;
+    DO $$ BEGIN
+      CREATE TYPE cash_session_status AS ENUM ('open', 'closed');
+    EXCEPTION WHEN duplicate_object THEN null; END $$;
+    DO $$ BEGIN
+      CREATE TYPE po_status AS ENUM ('draft', 'ordered', 'partial', 'received', 'cancelled');
     EXCEPTION WHEN duplicate_object THEN null; END $$;
   `);
 
@@ -26,9 +114,11 @@ export async function runMigrations() {
       id SERIAL PRIMARY KEY,
       email TEXT NOT NULL,
       password_hash TEXT NOT NULL,
-      role user_role NOT NULL DEFAULT 'student',
+      role user_role NOT NULL DEFAULT 'cashier',
       name TEXT NOT NULL,
+      phone TEXT,
       avatar_url TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT true,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL,
       updated_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
@@ -36,122 +126,10 @@ export async function runMigrations() {
   `);
 
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS classes (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      grade INTEGER NOT NULL,
-      teacher_id INTEGER NOT NULL REFERENCES users(id),
-      academic_year TEXT NOT NULL DEFAULT '2024-2025',
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS students (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id),
-      class_id INTEGER REFERENCES classes(id),
-      student_code TEXT NOT NULL,
-      grade INTEGER NOT NULL,
-      xp INTEGER NOT NULL DEFAULT 0,
-      level INTEGER NOT NULL DEFAULT 1,
-      streak_days INTEGER NOT NULL DEFAULT 0,
-      last_active_at TIMESTAMP DEFAULT NOW(),
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS students_code_idx ON students(student_code);
-    CREATE INDEX IF NOT EXISTS students_class_idx ON students(class_id);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS scores (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      subject subject NOT NULL,
-      score REAL NOT NULL,
-      max_score REAL NOT NULL DEFAULT 100,
-      assessment_type TEXT NOT NULL DEFAULT 'quiz',
-      assessment_name TEXT NOT NULL,
-      recorded_by INTEGER REFERENCES users(id),
-      recorded_at TIMESTAMP DEFAULT NOW() NOT NULL,
-      semester INTEGER NOT NULL DEFAULT 1,
-      academic_year TEXT NOT NULL DEFAULT '2024-2025'
-    );
-    CREATE INDEX IF NOT EXISTS scores_student_idx ON scores(student_id);
-    CREATE INDEX IF NOT EXISTS scores_subject_idx ON scores(subject);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS badges (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL,
-      icon TEXT NOT NULL,
-      category badge_category NOT NULL,
-      xp_reward INTEGER NOT NULL DEFAULT 50,
-      criteria TEXT NOT NULL,
-      color TEXT NOT NULL DEFAULT '#6366f1'
-    );
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS student_badges (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      badge_id INTEGER NOT NULL REFERENCES badges(id),
-      earned_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS student_badge_unique ON student_badges(student_id, badge_id);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS rankings (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      class_id INTEGER REFERENCES classes(id),
-      overall_rank INTEGER NOT NULL,
-      class_rank INTEGER,
-      average_score REAL NOT NULL,
-      total_xp INTEGER NOT NULL DEFAULT 0,
-      period TEXT NOT NULL DEFAULT '2024-2025-S1',
-      calculated_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS rankings_student_period ON rankings(student_id, period);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS predictions (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      subject subject NOT NULL,
-      predicted_score REAL NOT NULL,
-      confidence_score REAL NOT NULL,
-      risk_level risk_level NOT NULL DEFAULT 'low',
-      risk_factors TEXT[],
-      recommendations TEXT[],
-      generated_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS parent_links (
-      id SERIAL PRIMARY KEY,
-      parent_id INTEGER NOT NULL REFERENCES users(id),
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      relationship TEXT NOT NULL DEFAULT 'parent',
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS parent_student_unique ON parent_links(parent_id, student_id);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS activity_logs (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      activity_type TEXT NOT NULL,
-      description TEXT NOT NULL,
-      xp_earned INTEGER NOT NULL DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW()
     );
   `);
 
@@ -165,276 +143,282 @@ export async function runMigrations() {
       is_read BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_id);
   `);
 
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS class_subjects (
+    CREATE TABLE IF NOT EXISTS customers (
       id SERIAL PRIMARY KEY,
-      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-      subject TEXT NOT NULL,
-      UNIQUE(class_id, subject)
-    );
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token TEXT NOT NULL,
-      expires_at TIMESTAMP NOT NULL,
-      used_at TIMESTAMP,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS prt_token_idx ON password_reset_tokens(token);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS assessments (
-      id SERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT,
-      subject TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'quiz',
-      status TEXT NOT NULL DEFAULT 'draft',
-      time_limit_mins INTEGER,
-      max_attempts INTEGER NOT NULL DEFAULT 1,
-      passing_score REAL DEFAULT 50,
-      class_id INTEGER REFERENCES classes(id),
-      created_by INTEGER NOT NULL REFERENCES users(id),
-      instructions TEXT,
-      shuffle_questions BOOLEAN NOT NULL DEFAULT false,
-      shuffle_options BOOLEAN NOT NULL DEFAULT false,
-      scheduled_at TIMESTAMP,
-      closes_at TIMESTAMP,
-      semester INTEGER NOT NULL DEFAULT 1,
-      academic_year TEXT NOT NULL DEFAULT '2024-2025',
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      notes TEXT,
+      total_spent DECIMAL(12,2) NOT NULL DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL,
       updated_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS assessments_created_by_idx ON assessments(created_by);
-    CREATE INDEX IF NOT EXISTS assessments_class_idx ON assessments(class_id);
-    CREATE INDEX IF NOT EXISTS assessments_status_idx ON assessments(status);
+    CREATE INDEX IF NOT EXISTS customers_name_idx ON customers(name);
   `);
 
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS questions (
+    CREATE TABLE IF NOT EXISTS product_categories (
       id SERIAL PRIMARY KEY,
-      assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
-      type TEXT NOT NULL DEFAULT 'mcq',
-      text TEXT NOT NULL,
-      image_url TEXT,
-      points REAL NOT NULL DEFAULT 1,
-      order_index INTEGER NOT NULL DEFAULT 0,
-      explanation TEXT,
-      correct_answer TEXT,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS questions_assessment_idx ON questions(assessment_id);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS question_options (
-      id SERIAL PRIMARY KEY,
-      question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
-      text TEXT NOT NULL,
-      is_correct BOOLEAN NOT NULL DEFAULT false,
-      order_index INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS q_options_question_idx ON question_options(question_id);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS submissions (
-      id SERIAL PRIMARY KEY,
-      assessment_id INTEGER NOT NULL REFERENCES assessments(id),
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      status TEXT NOT NULL DEFAULT 'in_progress',
-      started_at TIMESTAMP DEFAULT NOW() NOT NULL,
-      submitted_at TIMESTAMP,
-      total_score REAL,
-      max_score REAL,
-      time_taken_secs INTEGER,
-      attempt_number INTEGER NOT NULL DEFAULT 1,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS submissions_assessment_student_idx ON submissions(assessment_id, student_id);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS submission_answers (
-      id SERIAL PRIMARY KEY,
-      submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
-      question_id INTEGER NOT NULL REFERENCES questions(id),
-      selected_option_id INTEGER REFERENCES question_options(id),
-      answer_text TEXT,
-      is_correct BOOLEAN,
-      points_awarded REAL DEFAULT 0,
-      feedback TEXT
-    );
-    CREATE INDEX IF NOT EXISTS sub_answers_submission_idx ON submission_answers(submission_id);
-  `);
-
-  // Question bank table
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS question_bank (
-      id          SERIAL PRIMARY KEY,
-      subject     TEXT NOT NULL,
-      type        TEXT NOT NULL DEFAULT 'mcq',
-      text        TEXT NOT NULL,
-      options     TEXT,
-      correct_answer TEXT,
-      explanation TEXT,
-      points      REAL NOT NULL DEFAULT 1,
-      tags        TEXT,
-      created_by  INTEGER NOT NULL REFERENCES users(id),
-      created_at  TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS qb_subject_idx ON question_bank(subject);
-  `);
-
-  // Assessment module v2 — public links + guest submissions
-  await db.execute(sql`
-    ALTER TABLE assessments ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false;
-    ALTER TABLE assessments ADD COLUMN IF NOT EXISTS public_token TEXT;
-    CREATE UNIQUE INDEX IF NOT EXISTS assessments_public_token_idx ON assessments(public_token) WHERE public_token IS NOT NULL;
-    ALTER TABLE submissions ALTER COLUMN student_id DROP NOT NULL;
-    ALTER TABLE submissions ADD COLUMN IF NOT EXISTS participant_name TEXT;
-    ALTER TABLE submissions ADD COLUMN IF NOT EXISTS is_guest BOOLEAN NOT NULL DEFAULT false;
-  `);
-
-  // LMS — Learning Management System
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS topics (
-      id SERIAL PRIMARY KEY,
-      subject TEXT NOT NULL,
       name TEXT NOT NULL,
       description TEXT,
-      order_index INTEGER NOT NULL DEFAULT 0,
-      created_by INTEGER NOT NULL REFERENCES users(id),
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS topics_subject_idx ON topics(subject);
   `);
 
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS learning_materials (
+    CREATE TABLE IF NOT EXISTS products (
       id SERIAL PRIMARY KEY,
-      topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
-      class_id INTEGER REFERENCES classes(id),
-      created_by INTEGER NOT NULL REFERENCES users(id),
+      category_id INTEGER REFERENCES product_categories(id),
+      name TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      description TEXT,
+      price DECIMAL(10,2) NOT NULL,
+      cost_price DECIMAL(10,2) NOT NULL DEFAULT 0,
+      unit TEXT NOT NULL DEFAULT 'piece',
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS products_sku_idx ON products(sku);
+    CREATE INDEX IF NOT EXISTS products_category_idx ON products(category_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS services (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      price_per_unit DECIMAL(10,2) NOT NULL,
+      unit TEXT NOT NULL DEFAULT 'page',
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS print_jobs (
+      id SERIAL PRIMARY KEY,
+      job_number TEXT NOT NULL,
+      customer_id INTEGER REFERENCES customers(id),
+      assigned_to INTEGER REFERENCES users(id),
+      status print_job_status NOT NULL DEFAULT 'pending',
       title TEXT NOT NULL,
       description TEXT,
-      type TEXT NOT NULL DEFAULT 'note',
-      url TEXT,
-      content TEXT,
-      is_published BOOLEAN NOT NULL DEFAULT false,
-      estimated_mins INTEGER DEFAULT 10,
-      order_index INTEGER NOT NULL DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
-      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS lm_topic_idx ON learning_materials(topic_id);
-    CREATE INDEX IF NOT EXISTS lm_class_idx ON learning_materials(class_id);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS lesson_progress (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      material_id INTEGER NOT NULL REFERENCES learning_materials(id) ON DELETE CASCADE,
-      completed_at TIMESTAMP,
-      time_spent_mins INTEGER DEFAULT 0,
-      is_bookmarked BOOLEAN NOT NULL DEFAULT false,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS lesson_progress_unique ON lesson_progress(student_id, material_id);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS announcements (
-      id SERIAL PRIMARY KEY,
-      class_id INTEGER REFERENCES classes(id),
-      author_id INTEGER NOT NULL REFERENCES users(id),
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      is_pinned BOOLEAN NOT NULL DEFAULT false,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
-      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS announcements_class_idx ON announcements(class_id);
-  `);
-
-  // Subject assignments
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS student_subjects (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-      subject TEXT NOT NULL,
-      enrolled_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS student_subject_unique ON student_subjects(student_id, subject);
-    CREATE INDEX IF NOT EXISTS ss_student_idx ON student_subjects(student_id);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS teacher_subjects (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      subject TEXT NOT NULL,
-      assigned_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS teacher_subject_unique ON teacher_subjects(user_id, subject);
-    CREATE INDEX IF NOT EXISTS ts_user_idx ON teacher_subjects(user_id);
-  `);
-
-  // Mentor system
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS mentor_requests (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      subject TEXT NOT NULL,
-      message TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
-      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS mr_student_idx ON mentor_requests(student_id);
-    CREATE INDEX IF NOT EXISTS mr_status_idx ON mentor_requests(status);
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS mentor_sessions (
-      id SERIAL PRIMARY KEY,
-      request_id INTEGER NOT NULL REFERENCES mentor_requests(id),
-      mentor_id INTEGER NOT NULL REFERENCES users(id),
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      scheduled_at TIMESTAMP,
+      service_id INTEGER REFERENCES services(id),
+      quantity INTEGER NOT NULL DEFAULT 1,
+      unit_price DECIMAL(10,2) NOT NULL DEFAULT 0,
+      total_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
       notes TEXT,
-      is_completed BOOLEAN NOT NULL DEFAULT false,
+      due_date TIMESTAMP,
       completed_at TIMESTAMP,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS print_jobs_number_idx ON print_jobs(job_number);
+    CREATE INDEX IF NOT EXISTS print_jobs_status_idx ON print_jobs(status);
+    CREATE INDEX IF NOT EXISTS print_jobs_customer_idx ON print_jobs(customer_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS inventory_items (
+      id SERIAL PRIMARY KEY,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      quantity_in_stock INTEGER NOT NULL DEFAULT 0,
+      reorder_level INTEGER NOT NULL DEFAULT 10,
+      location TEXT,
+      last_restocked_at TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS inventory_product_idx ON inventory_items(product_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+      id SERIAL PRIMARY KEY,
+      inventory_item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+      type movement_type NOT NULL,
+      quantity INTEGER NOT NULL,
+      reason TEXT,
+      reference_id INTEGER,
+      reference_type TEXT,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS inv_movement_item_idx ON inventory_movements(inventory_item_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      contact_name TEXT,
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      notes TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS purchase_orders (
+      id SERIAL PRIMARY KEY,
+      po_number TEXT NOT NULL,
+      supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+      status po_status NOT NULL DEFAULT 'draft',
+      total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      notes TEXT,
+      ordered_by INTEGER REFERENCES users(id),
+      ordered_at TIMESTAMP,
+      received_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS po_number_idx ON purchase_orders(po_number);
+    CREATE INDEX IF NOT EXISTS po_supplier_idx ON purchase_orders(supplier_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS purchase_order_items (
+      id SERIAL PRIMARY KEY,
+      purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      quantity INTEGER NOT NULL,
+      unit_price DECIMAL(10,2) NOT NULL,
+      total_price DECIMAL(10,2) NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS poi_po_idx ON purchase_order_items(purchase_order_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS cash_sessions (
+      id SERIAL PRIMARY KEY,
+      opened_by INTEGER NOT NULL REFERENCES users(id),
+      closed_by INTEGER REFERENCES users(id),
+      opening_balance DECIMAL(10,2) NOT NULL DEFAULT 0,
+      closing_balance DECIMAL(10,2),
+      total_sales DECIMAL(10,2) NOT NULL DEFAULT 0,
+      total_expenses DECIMAL(10,2) NOT NULL DEFAULT 0,
+      status cash_session_status NOT NULL DEFAULT 'open',
+      notes TEXT,
+      opened_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      closed_at TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS cash_session_status_idx ON cash_sessions(status);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS sales (
+      id SERIAL PRIMARY KEY,
+      sale_number TEXT NOT NULL,
+      customer_id INTEGER REFERENCES customers(id),
+      cashier_id INTEGER NOT NULL REFERENCES users(id),
+      cash_session_id INTEGER REFERENCES cash_sessions(id),
+      subtotal DECIMAL(10,2) NOT NULL,
+      discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+      tax_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+      total_amount DECIMAL(10,2) NOT NULL,
+      payment_method payment_method NOT NULL DEFAULT 'cash',
+      payment_status TEXT NOT NULL DEFAULT 'paid',
+      notes TEXT,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS sales_number_idx ON sales(sale_number);
+    CREATE INDEX IF NOT EXISTS sales_cashier_idx ON sales(cashier_id);
+    CREATE INDEX IF NOT EXISTS sales_session_idx ON sales(cash_session_id);
+    CREATE INDEX IF NOT EXISTS sales_created_idx ON sales(created_at);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS sale_items (
+      id SERIAL PRIMARY KEY,
+      sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+      product_id INTEGER REFERENCES products(id),
+      service_id INTEGER REFERENCES services(id),
+      print_job_id INTEGER REFERENCES print_jobs(id),
+      description TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      unit_price DECIMAL(10,2) NOT NULL,
+      discount DECIMAL(10,2) NOT NULL DEFAULT 0,
+      total_price DECIMAL(10,2) NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS sale_items_sale_idx ON sale_items(sale_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS expense_categories (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
   `);
 
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS mentor_ratings (
+    CREATE TABLE IF NOT EXISTS expenses (
       id SERIAL PRIMARY KEY,
-      session_id INTEGER NOT NULL REFERENCES mentor_sessions(id),
-      student_id INTEGER NOT NULL REFERENCES students(id),
-      mentor_id INTEGER NOT NULL REFERENCES users(id),
-      rating INTEGER NOT NULL,
-      comment TEXT,
+      category_id INTEGER REFERENCES expense_categories(id),
+      cash_session_id INTEGER REFERENCES cash_sessions(id),
+      description TEXT NOT NULL,
+      amount DECIMAL(10,2) NOT NULL,
+      payment_method payment_method NOT NULL DEFAULT 'cash',
+      reference_number TEXT,
+      expense_date TIMESTAMP DEFAULT NOW() NOT NULL,
+      recorded_by INTEGER REFERENCES users(id),
+      notes TEXT,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS mentor_rating_session_unique ON mentor_ratings(session_id);
+    CREATE INDEX IF NOT EXISTS expenses_date_idx ON expenses(expense_date);
+    CREATE INDEX IF NOT EXISTS expenses_category_idx ON expenses(category_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS receipts (
+      id SERIAL PRIMARY KEY,
+      sale_id INTEGER NOT NULL REFERENCES sales(id),
+      receipt_number TEXT NOT NULL,
+      generated_by INTEGER REFERENCES users(id),
+      generated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS receipts_number_idx ON receipts(receipt_number);
+    CREATE INDEX IF NOT EXISTS receipts_sale_idx ON receipts(sale_id);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id INTEGER,
+      old_values TEXT,
+      new_values TEXT,
+      ip_address TEXT,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS audit_user_idx ON audit_logs(user_id);
+    CREATE INDEX IF NOT EXISTS audit_entity_idx ON audit_logs(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS audit_created_idx ON audit_logs(created_at);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS staff_activity (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      activity_type TEXT NOT NULL,
+      description TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS staff_activity_user_idx ON staff_activity(user_id);
   `);
 
   console.log('Migrations completed successfully!');

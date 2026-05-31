@@ -1,272 +1,343 @@
 import { db } from './index';
-import { users, students, classes, scores, badges, studentBadges, activityLogs, rankings, predictions, parentLinks, notifications } from './schema';
+import {
+  users, customers, productCategories, products, services, printJobs,
+  inventoryItems, suppliers, cashSessions, sales, saleItems,
+  expenseCategories, expenses, notifications, settings,
+} from './schema';
 import bcrypt from 'bcryptjs';
 import { eq, sql } from 'drizzle-orm';
 
-const SUBJECTS = ['math', 'science', 'english', 'history', 'art', 'pe', 'ict', 'music'] as const;
-
-function randomBetween(min: number, max: number) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function generateScoreForStudent(baseSkill: number, subject: string, month: number): number {
-  const subjectBias: Record<string, number> = {
-    math: 0, science: -5, english: 3, history: 5, art: 8, pe: 10, ict: 2, music: 7
-  };
-  const bias = subjectBias[subject] ?? 0;
-  const trendBonus = month * 1.5;
-  const noise = randomBetween(-12, 12);
-  return Math.min(100, Math.max(25, Math.round(baseSkill + bias + trendBonus + noise)));
-}
-
 export async function seedDatabase() {
-  // Check ALL critical tables — users alone is not enough (reset can wipe students)
-  const [userCount, studentCount, badgeCount] = await Promise.all([
-    db.select({ count: sql<number>`COUNT(*)` }).from(users),
-    db.select({ count: sql<number>`COUNT(*)` }).from(students),
-    db.select({ count: sql<number>`COUNT(*)` }).from(badges),
-  ]);
+  const [userCount] = await db.select({ count: sql<number>`COUNT(*)` }).from(users);
 
-  if (userCount[0].count > 0 && studentCount[0].count > 0 && badgeCount[0].count > 0) {
-    // Verify the demo admin password is still correct — catches stale hashes from old deploys
-    const [adminUser] = await db
+  if (Number(userCount.count) > 0) {
+    const [ownerUser] = await db
       .select({ passwordHash: users.passwordHash })
       .from(users)
-      .where(eq(users.email, 'admin@eduanalytics.com'))
+      .where(eq(users.email, 'owner@printshop.com'))
       .limit(1);
 
-    const passwordValid = adminUser ? await bcrypt.compare('admin123', adminUser.passwordHash) : false;
+    const passwordValid = ownerUser ? await bcrypt.compare('owner123', ownerUser.passwordHash) : false;
     if (passwordValid) {
       console.log('Database already seeded, skipping...');
       return;
     }
-    console.log('Demo account passwords are stale — re-seeding...');
-    await db.execute(sql`TRUNCATE TABLE notifications, parent_links, predictions, activity_logs, rankings, student_badges, scores, students, class_subjects, classes, badges, users RESTART IDENTITY CASCADE`);
+    console.log('Stale data detected — re-seeding...');
+    await db.execute(sql`
+      TRUNCATE TABLE notifications, staff_activity, audit_logs, receipts, expenses, expense_categories,
+      sale_items, sales, cash_sessions, purchase_order_items, purchase_orders, suppliers,
+      inventory_movements, inventory_items, print_jobs, services, products, product_categories,
+      customers, settings, users RESTART IDENTITY CASCADE
+    `);
   }
 
-  // Partial data detected — wipe and re-seed cleanly
-  if (userCount[0].count > 0 || studentCount[0].count > 0) {
-    console.log('Partial data detected, wiping and re-seeding...');
-    await db.execute(sql`TRUNCATE TABLE notifications, parent_links, predictions, activity_logs, rankings, student_badges, scores, students, class_subjects, classes, badges, users RESTART IDENTITY CASCADE`);
-  }
+  console.log('Seeding PrintShop database...');
 
-  console.log('Seeding database...');
+  // ─── Seed Users ──────────────────────────────────────────
+  const ownerHash = await bcrypt.hash('owner123', 12);
+  const managerHash = await bcrypt.hash('manager123', 12);
+  const cashierHash = await bcrypt.hash('cashier123', 12);
+  const operatorHash = await bcrypt.hash('operator123', 12);
+  const inventoryHash = await bcrypt.hash('inventory123', 12);
 
-  // ─── Seed Badges ────────────────────────────────────────
-  const badgeData = [
-    { name: 'Perfect Score', description: 'Achieved 100% on an assessment', icon: '🏆', category: 'academic' as const, xpReward: 150, criteria: 'score = maxScore', color: '#f59e0b' },
-    { name: 'Fast Learner', description: 'Improved score by 20+ points in one subject', icon: '🚀', category: 'improvement' as const, xpReward: 100, criteria: 'improvement >= 20', color: '#6366f1' },
-    { name: 'Bookworm', description: 'Completed 20 assessments', icon: '📚', category: 'milestone' as const, xpReward: 75, criteria: 'assessments >= 20', color: '#10b981' },
-    { name: 'Streak Master', description: 'Maintained a 7-day learning streak', icon: '🔥', category: 'streak' as const, xpReward: 120, criteria: 'streak >= 7', color: '#f43f5e' },
-    { name: 'Math Wizard', description: 'Scored 90%+ in Math three times', icon: '🔢', category: 'academic' as const, xpReward: 100, criteria: 'math_90plus >= 3', color: '#4f46e5' },
-    { name: 'Science Star', description: 'Scored 90%+ in Science', icon: '⚗️', category: 'academic' as const, xpReward: 90, criteria: 'science_90plus >= 1', color: '#0ea5e9' },
-    { name: 'Consistent', description: 'Never scored below 70% in a week', icon: '✅', category: 'streak' as const, xpReward: 80, criteria: 'weekly_min >= 70', color: '#10b981' },
-    { name: 'Top Achiever', description: 'Ranked in top 3 of class', icon: '👑', category: 'milestone' as const, xpReward: 200, criteria: 'rank <= 3', color: '#f59e0b' },
-    { name: 'Team Player', description: 'Helped 5 peers with study sessions', icon: '🤝', category: 'social' as const, xpReward: 60, criteria: 'peer_help >= 5', color: '#8b5cf6' },
-    { name: 'Level Up!', description: 'Reached Level 5', icon: '⬆️', category: 'milestone' as const, xpReward: 100, criteria: 'level >= 5', color: '#ec4899' },
-  ];
-  const insertedBadges = await db.insert(badges).values(badgeData).returning();
-
-  // ─── Seed Admin ─────────────────────────────────────────
-  const adminHash = await bcrypt.hash('admin123', 12);
-  const [admin] = await db.insert(users).values({
-    name: 'Dr. Sarah Mitchell',
-    email: 'admin@eduanalytics.com',
-    passwordHash: adminHash,
-    role: 'admin',
+  const [owner] = await db.insert(users).values({
+    name: 'Maria Santos',
+    email: 'owner@printshop.com',
+    passwordHash: ownerHash,
+    role: 'owner',
+    phone: '+63 917 123 4567',
+    isActive: true,
   }).returning();
 
-  // ─── Seed Teachers ───────────────────────────────────────
-  const teacherHash = await bcrypt.hash('teacher123', 12);
-  const teacherData = [
-    { name: 'Mr. James Rodriguez', email: 'j.rodriguez@eduanalytics.com' },
-    { name: 'Ms. Priya Sharma', email: 'p.sharma@eduanalytics.com' },
-    { name: 'Mr. David Chen', email: 'd.chen@eduanalytics.com' },
-  ];
-  const insertedTeachers = await db.insert(users).values(
-    teacherData.map(t => ({ ...t, passwordHash: teacherHash, role: 'teacher' as const }))
-  ).returning();
-
-  // ─── Seed Classes ────────────────────────────────────────
-  const classData = [
-    { name: 'Grade 10-A', grade: 10, teacherId: insertedTeachers[0].id },
-    { name: 'Grade 10-B', grade: 10, teacherId: insertedTeachers[1].id },
-    { name: 'Grade 11-A', grade: 11, teacherId: insertedTeachers[2].id },
-    { name: 'Grade 11-B', grade: 11, teacherId: insertedTeachers[0].id },
-  ];
-  const insertedClasses = await db.insert(classes).values(classData).returning();
-
-  // ─── Seed Students ───────────────────────────────────────
-  const studentNames = [
-    'Alex Johnson', 'Emma Williams', 'Liam Brown', 'Olivia Davis',
-    'Noah Miller', 'Ava Wilson', 'Mason Moore', 'Isabella Taylor',
-    'Ethan Anderson', 'Sophia Thomas', 'Lucas Jackson', 'Mia White',
-    'Aiden Harris', 'Charlotte Martin', 'James Thompson', 'Amelia Garcia',
-    'Benjamin Martinez', 'Harper Robinson', 'Logan Clark', 'Evelyn Lewis',
-    'Sebastian Lee', 'Abigail Walker', 'Mateo Hall', 'Emily Allen',
-    'Henry Young', 'Elizabeth Hernandez', 'Alexander King', 'Sofia Wright',
-    'Daniel Scott', 'Victoria Green',
-  ];
-
-  const studentHash = await bcrypt.hash('student123', 12);
-  const parentHash = await bcrypt.hash('parent123', 12);
-
-  // Also create demo accounts
-  const [demoStudentUser] = await db.insert(users).values({
-    name: 'Alex Johnson',
-    email: 'student@eduanalytics.com',
-    passwordHash: studentHash,
-    role: 'student',
+  const [manager] = await db.insert(users).values({
+    name: 'Jose Reyes',
+    email: 'manager@printshop.com',
+    passwordHash: managerHash,
+    role: 'manager',
+    phone: '+63 918 234 5678',
+    isActive: true,
   }).returning();
 
-  const [demoParentUser] = await db.insert(users).values({
-    name: 'Robert Johnson',
-    email: 'parent@eduanalytics.com',
-    passwordHash: parentHash,
-    role: 'parent',
+  const [cashier] = await db.insert(users).values({
+    name: 'Ana Cruz',
+    email: 'cashier@printshop.com',
+    passwordHash: cashierHash,
+    role: 'cashier',
+    phone: '+63 919 345 6789',
+    isActive: true,
   }).returning();
 
-  const skillLevels = studentNames.map(() => randomBetween(45, 90));
-  const insertedStudentUsers: { id: number; name: string }[] = [];
+  const [operator] = await db.insert(users).values({
+    name: 'Pedro Dela Cruz',
+    email: 'operator@printshop.com',
+    passwordHash: operatorHash,
+    role: 'print_operator',
+    phone: '+63 920 456 7890',
+    isActive: true,
+  }).returning();
 
-  for (let i = 0; i < studentNames.length; i++) {
-    const name = studentNames[i];
-    // Skip if already inserted Alex Johnson as demo
-    if (name === 'Alex Johnson') {
-      insertedStudentUsers.push(demoStudentUser);
-      continue;
-    }
-    const [u] = await db.insert(users).values({
-      name,
-      email: `student${i + 1}@eduanalytics.com`,
-      passwordHash: studentHash,
-      role: 'student',
-    }).returning();
-    insertedStudentUsers.push(u);
-  }
+  const [invOfficer] = await db.insert(users).values({
+    name: 'Rosa Garcia',
+    email: 'inventory@printshop.com',
+    passwordHash: inventoryHash,
+    role: 'inventory_officer',
+    phone: '+63 921 567 8901',
+    isActive: true,
+  }).returning();
 
-  const insertedStudents = [];
-  for (let i = 0; i < insertedStudentUsers.length; i++) {
-    const u = insertedStudentUsers[i];
-    const xp = randomBetween(200, 8000);
-    const level = Math.min(20, Math.floor(xp / 400) + 1);
-    const classId = insertedClasses[i % insertedClasses.length].id;
-    const grade = classId <= 2 ? 10 : 11;
-    const [s] = await db.insert(students).values({
-      userId: u.id,
-      classId,
-      studentCode: `STU-${String(i + 1).padStart(5, '0')}`,
-      grade,
-      xp,
-      level,
-      streakDays: randomBetween(0, 14),
-    }).returning();
-    insertedStudents.push({ ...s, name: u.name, skill: skillLevels[i] });
-  }
+  // ─── Seed Customers ─────────────────────────────────────
+  const customerData = [
+    { name: 'Bright Future School', email: 'admin@brightfuture.edu', phone: '+63 2 888 1234', address: 'Quezon City, Metro Manila', notes: 'Regular bulk order client' },
+    { name: 'City Hall Procurement', email: 'proc@cityhall.gov', phone: '+63 2 888 5678', address: 'Manila City Hall', notes: 'Government client — requires official receipt' },
+    { name: 'Bayanihan Cooperative', email: 'info@bayanihan.coop', phone: '+63 2 888 9012', address: 'Makati, Metro Manila', notes: 'Monthly calendar orders' },
+    { name: 'Juan dela Cruz', email: 'juan@email.com', phone: '+63 917 111 2222', address: 'Pasig City', notes: '' },
+    { name: 'Maria Reyes', email: 'maria.r@email.com', phone: '+63 918 333 4444', address: 'Mandaluyong', notes: 'Wedding invitation client' },
+    { name: 'ABC Publishing House', email: 'orders@abcpublish.com', phone: '+63 2 777 1111', address: 'Ortigas Center', notes: 'Large volume book reprints' },
+    { name: 'Walk-in Customer', email: '', phone: '', address: '', notes: 'Default walk-in account' },
+  ];
+  const insertedCustomers = await db.insert(customers).values(customerData).returning();
 
-  // ─── Seed Scores ─────────────────────────────────────────
-  const assessmentNames = {
-    math: ['Algebra Quiz', 'Geometry Test', 'Calculus Midterm', 'Statistics Exam', 'Trigonometry Quiz'],
-    science: ['Biology Lab', 'Chemistry Test', 'Physics Exam', 'Ecology Quiz', 'Scientific Method'],
-    english: ['Essay Writing', 'Grammar Test', 'Literature Analysis', 'Reading Comprehension', 'Poetry Review'],
-    history: ['World War II Test', 'Ancient Civilizations', 'Modern History Exam', 'Geography Quiz', 'Political Science'],
-    art: ['Portfolio Review', 'Painting Project', 'Design Critique', 'Art History Test', 'Sculpture Assessment'],
-    pe: ['Fitness Assessment', 'Sports Skills Test', 'Endurance Run', 'Team Sport Eval', 'Flexibility Test'],
-    ict: ['Programming Quiz', 'Network Fundamentals', 'Database Design', 'Web Development Project', 'Cybersecurity Test'],
-    music: ['Theory Exam', 'Instrument Performance', 'Music History', 'Composition Project', 'Ear Training'],
-  };
+  // ─── Seed Product Categories ─────────────────────────────
+  const catData = [
+    { name: 'Books', description: 'Textbooks, references, novels' },
+    { name: 'Office Supplies', description: 'Pens, pencils, notebooks, folders' },
+    { name: 'Art Supplies', description: 'Paints, brushes, drawing materials' },
+    { name: 'Paper Products', description: 'Bond paper, colored paper, specialty paper' },
+    { name: 'School Supplies', description: 'Rulers, erasers, backpacks' },
+  ];
+  const insertedCategories = await db.insert(productCategories).values(catData).returning();
 
-  for (const student of insertedStudents) {
-    for (const subject of SUBJECTS) {
-      const numScores = randomBetween(3, 6);
-      const names = assessmentNames[subject];
-      for (let m = 0; m < numScores; m++) {
-        const month = randomBetween(1, 5);
-        const scoreVal = generateScoreForStudent(student.skill, subject, month);
-        const date = new Date(2025, month - 1, randomBetween(1, 28));
-        await db.insert(scores).values({
-          studentId: student.id,
-          subject,
-          score: scoreVal,
-          maxScore: 100,
-          assessmentType: m % 3 === 0 ? 'exam' : m % 3 === 1 ? 'quiz' : 'homework',
-          assessmentName: names[m % names.length],
-          recordedBy: admin.id,
-          recordedAt: date,
-          semester: 1,
-          academicYear: '2024-2025',
-        });
-      }
-    }
-  }
+  // ─── Seed Products ───────────────────────────────────────
+  const productData = [
+    { categoryId: insertedCategories[0].id, name: 'Grade 5 Math Textbook', sku: 'BK-G5-MATH', price: '250.00', costPrice: '150.00', unit: 'piece', description: 'DepEd-aligned Grade 5 Mathematics' },
+    { categoryId: insertedCategories[0].id, name: 'Grade 5 Science Textbook', sku: 'BK-G5-SCI', price: '250.00', costPrice: '150.00', unit: 'piece', description: 'DepEd-aligned Grade 5 Science' },
+    { categoryId: insertedCategories[0].id, name: 'English Grammar Workbook', sku: 'BK-ENG-GRAM', price: '180.00', costPrice: '100.00', unit: 'piece', description: 'Grades 4–6 English Grammar' },
+    { categoryId: insertedCategories[1].id, name: 'Ballpen (Blue) Box', sku: 'OFF-BP-BLU-BOX', price: '85.00', costPrice: '45.00', unit: 'box', description: '20pcs per box, blue ink' },
+    { categoryId: insertedCategories[1].id, name: 'Spiral Notebook (80 leaves)', sku: 'OFF-NB-SP80', price: '55.00', costPrice: '30.00', unit: 'piece', description: 'A4 spiral notebook' },
+    { categoryId: insertedCategories[1].id, name: 'Expandable Folder (Long)', sku: 'OFF-FLD-EXP', price: '45.00', costPrice: '22.00', unit: 'piece', description: 'Long-size expandable folder' },
+    { categoryId: insertedCategories[3].id, name: 'Bond Paper (Short) Ream', sku: 'PPR-BOND-SHORT', price: '200.00', costPrice: '130.00', unit: 'ream', description: 'Short bond paper, 500 sheets' },
+    { categoryId: insertedCategories[3].id, name: 'Bond Paper (Long) Ream', sku: 'PPR-BOND-LONG', price: '220.00', costPrice: '145.00', unit: 'ream', description: 'Long bond paper, 500 sheets' },
+    { categoryId: insertedCategories[4].id, name: 'Pencil #2 Box', sku: 'SCH-PNC-BOX', price: '65.00', costPrice: '35.00', unit: 'box', description: '12pcs per box' },
+    { categoryId: insertedCategories[4].id, name: 'Ruler (30cm Plastic)', sku: 'SCH-RUL-30P', price: '25.00', costPrice: '12.00', unit: 'piece', description: 'Clear plastic ruler' },
+    { categoryId: insertedCategories[2].id, name: 'Watercolor Set (12 colors)', sku: 'ART-WC-12', price: '120.00', costPrice: '70.00', unit: 'set', description: '12-color watercolor paint' },
+    { categoryId: insertedCategories[1].id, name: 'Correction Tape', sku: 'OFF-CT-STD', price: '35.00', costPrice: '18.00', unit: 'piece', description: 'Standard correction tape' },
+  ];
+  const insertedProducts = await db.insert(products).values(productData).returning();
 
-  // ─── Seed Badges for Students ────────────────────────────
-  for (const student of insertedStudents) {
-    const numBadges = randomBetween(1, 5);
-    const shuffled = [...insertedBadges].sort(() => Math.random() - 0.5);
-    for (let i = 0; i < numBadges; i++) {
-      try {
-        await db.insert(studentBadges).values({ studentId: student.id, badgeId: shuffled[i].id });
-      } catch { /* skip duplicates */ }
-    }
-  }
+  // ─── Seed Services ───────────────────────────────────────
+  const serviceData = [
+    { name: 'Black & White Printing', description: 'Standard BW printing on bond paper', pricePerUnit: '3.00', unit: 'page' },
+    { name: 'Color Printing', description: 'Full-color printing on bond paper', pricePerUnit: '12.00', unit: 'page' },
+    { name: 'Photocopying', description: 'Photocopying service', pricePerUnit: '2.00', unit: 'page' },
+    { name: 'Lamination (Short)', description: 'Short-size lamination', pricePerUnit: '20.00', unit: 'page' },
+    { name: 'Lamination (Long)', description: 'Long-size lamination', pricePerUnit: '25.00', unit: 'page' },
+    { name: 'Binding (Comb)', description: 'Comb/coil binding per document', pricePerUnit: '45.00', unit: 'document' },
+    { name: 'Binding (Tape/Thermal)', description: 'Thermal binding per document', pricePerUnit: '55.00', unit: 'document' },
+    { name: 'Tarpaulin Printing 2x3ft', description: 'Standard tarpaulin print', pricePerUnit: '180.00', unit: 'piece' },
+    { name: 'ID Card Printing', description: 'PVC ID card printing', pricePerUnit: '150.00', unit: 'card' },
+    { name: 'Scanning', description: 'Document scanning to PDF', pricePerUnit: '5.00', unit: 'page' },
+  ];
+  const insertedServices = await db.insert(services).values(serviceData).returning();
 
-  // ─── Seed Activity Logs ──────────────────────────────────
-  for (const student of insertedStudents.slice(0, 10)) {
-    const activities = [
-      { type: 'login', desc: 'Logged into the platform', xp: 5 },
-      { type: 'score_recorded', desc: 'Completed a Math quiz with 88%', xp: 75 },
-      { type: 'badge_earned', desc: 'Earned the "Fast Learner" badge', xp: 100 },
-      { type: 'streak', desc: 'Maintained 7-day learning streak', xp: 50 },
-    ];
-    for (const act of activities) {
-      await db.insert(activityLogs).values({
-        studentId: student.id,
-        activityType: act.type,
-        description: act.desc,
-        xpEarned: act.xp,
-        createdAt: new Date(Date.now() - randomBetween(0, 7) * 86400000),
-      });
-    }
-  }
+  // ─── Seed Inventory Items ────────────────────────────────
+  const inventoryData = insertedProducts.map((p, i) => ({
+    productId: p.id,
+    quantityInStock: [45, 38, 60, 120, 85, 70, 25, 20, 95, 110, 40, 75][i] ?? 50,
+    reorderLevel: [10, 10, 15, 30, 20, 20, 5, 5, 25, 30, 10, 20][i] ?? 10,
+    location: 'Main Storage',
+  }));
+  await db.insert(inventoryItems).values(inventoryData);
 
-  // ─── Link Parent to Demo Student ────────────────────────
-  if (insertedStudents.length > 0) {
-    await db.insert(parentLinks).values({
-      parentId: demoParentUser.id,
-      studentId: insertedStudents[0].id,
-      relationship: 'parent',
-    });
-  }
+  // ─── Seed Suppliers ──────────────────────────────────────
+  const supplierData = [
+    { name: 'National Book Store Wholesale', contactName: 'Carlos Mendoza', email: 'wholesale@nbs.com.ph', phone: '+63 2 527 1234', address: 'Quezon City', notes: 'Main book supplier' },
+    { name: 'Paper Palace Supplies', contactName: 'Elena Torres', email: 'sales@paperpalace.com', phone: '+63 2 527 5678', address: 'Manila', notes: 'Paper and printing supplies' },
+    { name: 'Inkjet Masters Corp', contactName: 'Antonio Lim', email: 'orders@inkjetmasters.ph', phone: '+63 2 527 9012', address: 'Makati', notes: 'Printer inks and toners' },
+    { name: 'Scholastic Philippines', contactName: 'Sandra Ocampo', email: 'trade@scholastic.ph', phone: '+63 2 888 3456', address: 'Ortigas', notes: 'Educational books and materials' },
+  ];
+  await db.insert(suppliers).values(supplierData);
 
-  // ─── Seed Predictions ────────────────────────────────────
-  for (const student of insertedStudents.slice(0, 5)) {
-    for (const subject of SUBJECTS.slice(0, 4)) {
-      const predicted = randomBetween(55, 95);
-      const riskLevel = predicted < 60 ? 'critical' : predicted < 70 ? 'high' : predicted < 80 ? 'medium' : 'low';
-      await db.insert(predictions).values({
-        studentId: student.id,
-        subject,
-        predictedScore: predicted,
-        confidenceScore: Math.round(randomBetween(55, 90)) / 100,
-        riskLevel: riskLevel as any,
-        riskFactors: riskLevel !== 'low' ? ['Inconsistent performance', 'Below average scores'] : [],
-        recommendations: ['Keep up the study habits', 'Review previous exam mistakes'],
-      });
-    }
-  }
+  // ─── Seed Cash Session ───────────────────────────────────
+  const today = new Date();
+  const [openSession] = await db.insert(cashSessions).values({
+    openedBy: cashier.id,
+    openingBalance: '5000.00',
+    totalSales: '0.00',
+    totalExpenses: '0.00',
+    status: 'open',
+    openedAt: today,
+  }).returning();
+
+  // Closed session from yesterday
+  const yesterday = new Date(today.getTime() - 86400000);
+  await db.insert(cashSessions).values({
+    openedBy: cashier.id,
+    closedBy: manager.id,
+    openingBalance: '5000.00',
+    closingBalance: '18450.00',
+    totalSales: '14200.00',
+    totalExpenses: '750.00',
+    status: 'closed',
+    openedAt: yesterday,
+    closedAt: new Date(yesterday.getTime() + 8 * 3600000),
+  });
+
+  // ─── Seed Print Jobs ─────────────────────────────────────
+  const printJobsData = [
+    {
+      jobNumber: 'PJ-2026-001',
+      customerId: insertedCustomers[0].id,
+      assignedTo: operator.id,
+      status: 'completed' as const,
+      title: 'School ID Printing — 250 students',
+      serviceId: insertedServices[8].id,
+      quantity: 250,
+      unitPrice: '150.00',
+      totalAmount: '37500.00',
+      createdBy: cashier.id,
+      dueDate: new Date(today.getTime() - 5 * 86400000),
+      completedAt: new Date(today.getTime() - 3 * 86400000),
+    },
+    {
+      jobNumber: 'PJ-2026-002',
+      customerId: insertedCustomers[1].id,
+      assignedTo: operator.id,
+      status: 'in_progress' as const,
+      title: 'Annual Report Printing & Binding',
+      serviceId: insertedServices[5].id,
+      quantity: 50,
+      unitPrice: '250.00',
+      totalAmount: '12500.00',
+      createdBy: cashier.id,
+      dueDate: new Date(today.getTime() + 2 * 86400000),
+    },
+    {
+      jobNumber: 'PJ-2026-003',
+      customerId: insertedCustomers[4].id,
+      assignedTo: operator.id,
+      status: 'pending' as const,
+      title: 'Wedding Invitation — 300 pieces',
+      serviceId: insertedServices[1].id,
+      quantity: 300,
+      unitPrice: '35.00',
+      totalAmount: '10500.00',
+      createdBy: cashier.id,
+      dueDate: new Date(today.getTime() + 7 * 86400000),
+    },
+    {
+      jobNumber: 'PJ-2026-004',
+      customerId: insertedCustomers[2].id,
+      assignedTo: operator.id,
+      status: 'pending' as const,
+      title: 'Monthly Newsletter Printing',
+      serviceId: insertedServices[0].id,
+      quantity: 500,
+      unitPrice: '3.00',
+      totalAmount: '1500.00',
+      createdBy: manager.id,
+      dueDate: new Date(today.getTime() + 1 * 86400000),
+    },
+  ];
+  await db.insert(printJobs).values(printJobsData);
+
+  // ─── Seed Sales ──────────────────────────────────────────
+  const saleRecords = [
+    {
+      saleNumber: 'SL-2026-0001',
+      customerId: insertedCustomers[3].id,
+      cashierId: cashier.id,
+      cashSessionId: openSession.id,
+      subtotal: '530.00',
+      discountAmount: '0.00',
+      taxAmount: '0.00',
+      totalAmount: '530.00',
+      paymentMethod: 'cash' as const,
+      paymentStatus: 'paid',
+      createdAt: new Date(today.getTime() - 2 * 3600000),
+    },
+    {
+      saleNumber: 'SL-2026-0002',
+      customerId: insertedCustomers[0].id,
+      cashierId: cashier.id,
+      cashSessionId: openSession.id,
+      subtotal: '2750.00',
+      discountAmount: '275.00',
+      taxAmount: '0.00',
+      totalAmount: '2475.00',
+      paymentMethod: 'gcash' as const,
+      paymentStatus: 'paid',
+      createdAt: new Date(today.getTime() - 1 * 3600000),
+    },
+  ];
+  const insertedSales = await db.insert(sales).values(saleRecords).returning();
+
+  await db.insert(saleItems).values([
+    { saleId: insertedSales[0].id, productId: insertedProducts[0].id, description: 'Grade 5 Math Textbook', quantity: 2, unitPrice: '250.00', discount: '0.00', totalPrice: '500.00' },
+    { saleId: insertedSales[0].id, productId: insertedProducts[3].id, description: 'Ballpen (Blue) Box', quantity: 1, unitPrice: '85.00', discount: '0.00', totalPrice: '85.00' },
+  ]);
+
+  await db.insert(saleItems).values([
+    { saleId: insertedSales[1].id, productId: insertedProducts[0].id, description: 'Grade 5 Math Textbook', quantity: 5, unitPrice: '250.00', discount: '125.00', totalPrice: '1125.00' },
+    { saleId: insertedSales[1].id, productId: insertedProducts[1].id, description: 'Grade 5 Science Textbook', quantity: 5, unitPrice: '250.00', discount: '125.00', totalPrice: '1125.00' },
+    { saleId: insertedSales[1].id, productId: insertedProducts[4].id, description: 'Spiral Notebook (80 leaves)', quantity: 5, unitPrice: '55.00', discount: '25.00', totalPrice: '250.00' },
+  ]);
+
+  // ─── Seed Expense Categories ─────────────────────────────
+  const expCatData = [
+    { name: 'Utilities', description: 'Electricity, water, internet' },
+    { name: 'Supplies & Consumables', description: 'Ink, toner, paper for printing' },
+    { name: 'Rent', description: 'Monthly store rent' },
+    { name: 'Salaries', description: 'Staff wages' },
+    { name: 'Maintenance & Repair', description: 'Equipment service and repair' },
+    { name: 'Miscellaneous', description: 'Other business expenses' },
+  ];
+  const insertedExpCats = await db.insert(expenseCategories).values(expCatData).returning();
+
+  await db.insert(expenses).values([
+    {
+      categoryId: insertedExpCats[1].id,
+      cashSessionId: openSession.id,
+      description: 'Black ink cartridge refill — HP LaserJet',
+      amount: '450.00',
+      paymentMethod: 'cash' as const,
+      expenseDate: today,
+      recordedBy: manager.id,
+    },
+    {
+      categoryId: insertedExpCats[0].id,
+      description: 'Monthly electricity bill',
+      amount: '8500.00',
+      paymentMethod: 'transfer' as const,
+      referenceNumber: 'MERALCO-2026-05',
+      expenseDate: new Date(today.getFullYear(), today.getMonth(), 5),
+      recordedBy: owner.id,
+    },
+  ]);
 
   // ─── Seed Notifications ──────────────────────────────────
   await db.insert(notifications).values([
-    { userId: demoStudentUser.id, title: 'New Badge Earned!', message: 'You earned the "Fast Learner" badge. Keep it up!', type: 'success' },
-    { userId: demoStudentUser.id, title: 'Score Recorded', message: 'Your Math quiz score has been recorded: 88/100', type: 'info' },
-    { userId: admin.id, title: 'System Ready', message: 'EduAnalytics platform is fully operational.', type: 'info' },
+    { userId: owner.id, title: 'Low Stock Alert', message: '3 products are below reorder level. Check inventory.', type: 'warning' },
+    { userId: manager.id, title: 'Print Job Due Tomorrow', message: 'Job PJ-2026-002 (Annual Report) is due tomorrow.', type: 'info' },
+    { userId: cashier.id, title: 'Cash Session Active', message: 'Your cash session is open. Have a great shift!', type: 'success' },
+    { userId: operator.id, title: 'New Print Job Assigned', message: 'PJ-2026-004 has been assigned to you.', type: 'info' },
+  ]);
+
+  // ─── Seed Settings ───────────────────────────────────────
+  await db.insert(settings).values([
+    { key: 'shop_name', value: 'PrintShop Manager' },
+    { key: 'shop_address', value: '123 Print Street, Manila, Philippines' },
+    { key: 'shop_phone', value: '+63 2 888 0000' },
+    { key: 'shop_email', value: 'info@printshop.ph' },
+    { key: 'currency', value: 'PHP' },
+    { key: 'tax_rate', value: '0' },
+    { key: 'receipt_footer', value: 'Thank you for your business! Come again.' },
   ]);
 
   console.log('Database seeded successfully!');
   console.log('\nDemo Accounts:');
-  console.log('  Admin:   admin@eduanalytics.com / admin123');
-  console.log('  Teacher: j.rodriguez@eduanalytics.com / teacher123');
-  console.log('  Student: student@eduanalytics.com / student123');
-  console.log('  Parent:  parent@eduanalytics.com / parent123');
+  console.log('  Owner:              owner@printshop.com / owner123');
+  console.log('  Manager:            manager@printshop.com / manager123');
+  console.log('  Cashier:            cashier@printshop.com / cashier123');
+  console.log('  Print Operator:     operator@printshop.com / operator123');
+  console.log('  Inventory Officer:  inventory@printshop.com / inventory123');
 }

@@ -1,124 +1,75 @@
 import { Router } from 'express';
-import { db } from '../db/index';
-import { students, scores, users, studentBadges, badges, rankings } from '../db/schema';
-import { eq, desc, sql } from 'drizzle-orm';
 import { authenticate, authorize } from '../middleware/auth';
+import { db } from '../db/index';
+import { sales, saleItems, expenses, printJobs } from '../db/schema';
+import { eq, sql, gte, lte, and, desc } from 'drizzle-orm';
 
 const router = Router();
+router.use(authenticate);
+router.use(authorize('owner', 'manager'));
 
-// GET /api/reports/class-performance
-router.get('/class-performance', authenticate, authorize('admin', 'teacher'), async (_req, res) => {
+router.get('/sales-summary', async (req, res) => {
   try {
-    const result = await db
-      .select({
-        studentId: students.id,
-        name: users.name,
-        studentCode: students.studentCode,
-        grade: students.grade,
-        xp: students.xp,
-        level: students.level,
-        streakDays: students.streakDays,
-        avgScore: sql<number>`COALESCE(ROUND(CAST(AVG(scores.score / scores.max_score * 100) AS numeric), 1), 0)`,
-        totalAssessments: sql<number>`COUNT(scores.id)`,
-        badgeCount: sql<number>`(SELECT COUNT(*) FROM student_badges WHERE student_id = students.id)`,
-      })
-      .from(students)
-      .innerJoin(users, eq(students.userId, users.id))
-      .leftJoin(scores, eq(scores.studentId, students.id))
-      .groupBy(students.id, users.name, users.email)
-      .orderBy(sql`AVG(scores.score / scores.max_score * 100) DESC NULLS LAST`);
+    const { from, to } = req.query as { from?: string; to?: string };
+    const fromDate = from ? new Date(from) : new Date(new Date().setDate(1));
+    const toDate = to ? new Date(to) : new Date();
 
-    return res.json(result);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Failed to generate report' });
-  }
-});
+    const [summary] = await db.select({
+      totalSales: sql<string>`COALESCE(SUM(total_amount), 0)`,
+      totalOrders: sql<number>`COUNT(*)`,
+      avgOrder: sql<string>`COALESCE(AVG(total_amount), 0)`,
+    }).from(sales).where(and(gte(sales.createdAt, fromDate), lte(sales.createdAt, toDate)));
 
-// GET /api/reports/student/:studentId/full
-router.get('/student/:studentId/full', authenticate, async (req, res) => {
-  try {
-    const studentId = parseInt(req.params.studentId);
+    const [expSummary] = await db.select({
+      totalExpenses: sql<string>`COALESCE(SUM(amount), 0)`,
+    }).from(expenses).where(and(gte(expenses.expenseDate, fromDate), lte(expenses.expenseDate, toDate)));
 
-    const [student] = await db.select({
-      id: students.id,
-      name: users.name,
-      email: users.email,
-      studentCode: students.studentCode,
-      grade: students.grade,
-      xp: students.xp,
-      level: students.level,
-      streakDays: students.streakDays,
-      lastActiveAt: students.lastActiveAt,
-      createdAt: students.createdAt,
-    }).from(students).innerJoin(users, eq(students.userId, users.id)).where(eq(students.id, studentId)).limit(1);
-
-    if (!student) return res.status(404).json({ error: 'Student not found' });
-
-    const allScores = await db.select().from(scores)
-      .where(eq(scores.studentId, studentId)).orderBy(desc(scores.recordedAt));
-
-    const subjectSummary = await db.select({
-      subject: scores.subject,
-      avgScore: sql<number>`ROUND(CAST(AVG(score / max_score * 100) AS numeric), 1)`,
-      highest: sql<number>`MAX(score / max_score * 100)`,
-      lowest: sql<number>`MIN(score / max_score * 100)`,
+    const dailySales = await db.select({
+      date: sql<string>`DATE(created_at)`,
+      total: sql<string>`SUM(total_amount)`,
       count: sql<number>`COUNT(*)`,
-    }).from(scores).where(eq(scores.studentId, studentId)).groupBy(scores.subject);
+    }).from(sales)
+      .where(and(gte(sales.createdAt, fromDate), lte(sales.createdAt, toDate)))
+      .groupBy(sql`DATE(created_at)`)
+      .orderBy(sql`DATE(created_at)`);
 
-    const earnedBadges = await db.select({ badge: badges, earnedAt: studentBadges.earnedAt })
-      .from(studentBadges).innerJoin(badges, eq(studentBadges.badgeId, badges.id))
-      .where(eq(studentBadges.studentId, studentId)).orderBy(desc(studentBadges.earnedAt));
+    const topProducts = await db.select({
+      description: saleItems.description,
+      totalQuantity: sql<number>`SUM(quantity)`,
+      totalRevenue: sql<string>`SUM(total_price)`,
+    }).from(saleItems)
+      .leftJoin(sales, eq(saleItems.saleId, sales.id))
+      .where(and(gte(sales.createdAt, fromDate), lte(sales.createdAt, toDate)))
+      .groupBy(saleItems.description)
+      .orderBy(sql`SUM(total_price) DESC`)
+      .limit(10);
 
-    const [ranking] = await db.select().from(rankings)
-      .where(eq(rankings.studentId, studentId)).orderBy(desc(rankings.calculatedAt)).limit(1);
-
-    const monthlyProgress = await db.select({
-      month: sql<string>`TO_CHAR(recorded_at, 'Mon YYYY')`,
-      monthOrder: sql<number>`EXTRACT(YEAR FROM recorded_at) * 12 + EXTRACT(MONTH FROM recorded_at)`,
-      avgScore: sql<number>`ROUND(CAST(AVG(score / max_score * 100) AS numeric), 1)`,
-      assessments: sql<number>`COUNT(*)`,
-    }).from(scores).where(eq(scores.studentId, studentId))
-      .groupBy(sql`TO_CHAR(recorded_at, 'Mon YYYY')`, sql`EXTRACT(YEAR FROM recorded_at) * 12 + EXTRACT(MONTH FROM recorded_at)`)
-      .orderBy(sql`EXTRACT(YEAR FROM recorded_at) * 12 + EXTRACT(MONTH FROM recorded_at)`);
-
-    return res.json({ student, scores: allScores, subjectSummary, badges: earnedBadges, ranking, monthlyProgress });
+    return res.json({
+      summary: {
+        totalSales: parseFloat(summary.totalSales),
+        totalOrders: Number(summary.totalOrders),
+        avgOrder: parseFloat(summary.avgOrder),
+        totalExpenses: parseFloat(expSummary.totalExpenses),
+        netRevenue: parseFloat(summary.totalSales) - parseFloat(expSummary.totalExpenses),
+      },
+      dailySales,
+      topProducts,
+    });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: 'Failed to generate student report' });
+    return res.status(500).json({ error: 'Failed to generate sales report' });
   }
 });
 
-// GET /api/reports/export-summary - CSV-ready data
-router.get('/export-summary', authenticate, authorize('admin', 'teacher'), async (_req, res) => {
+router.get('/print-jobs-summary', async (_req, res) => {
   try {
-    const result = await db.select({
-      name: users.name,
-      email: users.email,
-      studentCode: students.studentCode,
-      grade: students.grade,
-      xp: students.xp,
-      level: students.level,
-      avgScore: sql<number>`COALESCE(ROUND(CAST(AVG(scores.score / scores.max_score * 100) AS numeric), 1), 0)`,
-    })
-      .from(students)
-      .innerJoin(users, eq(students.userId, users.id))
-      .leftJoin(scores, eq(scores.studentId, students.id))
-      .groupBy(students.id, users.name, users.email)
-      .orderBy(desc(students.xp));
-
-    // Return as CSV text
-    const csv = [
-      'Name,Email,Student Code,Grade,XP,Level,Avg Score',
-      ...result.map(r => `${r.name},${r.email},${r.studentCode},${r.grade},${r.xp},${r.level},${r.avgScore}`),
-    ].join('\n');
-
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="student-report.csv"');
-    return res.send(csv);
-  } catch {
-    return res.status(500).json({ error: 'Failed to export report' });
-  }
+    const byStatus = await db.select({
+      status: printJobs.status,
+      count: sql<number>`COUNT(*)`,
+      total: sql<string>`SUM(total_amount)`,
+    }).from(printJobs).groupBy(printJobs.status);
+    return res.json({ byStatus });
+  } catch { return res.status(500).json({ error: 'Failed to generate print jobs report' }); }
 });
 
 export default router;

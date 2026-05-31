@@ -1,880 +1,100 @@
 import { useEffect, useState } from 'react';
-import { settingsApi, scoresApi, teamsApi, gamificationApi } from '../lib/api';
-import LoadingSpinner from '../components/LoadingSpinner';
-import { Settings as SettingsIcon, Save, RotateCcw, Trophy, Zap, BookOpen, CheckCircle, AlertCircle, Target, Trash2, RotateCw, Users, Plus, X, ShieldAlert, Award, Star } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
-
-const SUBJECT_KEYS = ['math', 'science', 'english', 'history', 'art', 'pe', 'ict', 'music'];
-
-const DEFAULT_SUBJECT_MAX_MARKS: Record<string, number> = {
-  math: 100, science: 100, english: 100, history: 100,
-  art: 100, pe: 100, ict: 100, music: 100,
-};
-
-const DEFAULT_LEVEL_THRESHOLDS = [
-  0, 100, 250, 500, 850, 1300, 1900, 2650, 3600, 4800,
-  6300, 8150, 10400, 13100, 16300, 20050, 24400, 29400, 35100, 41550,
-];
-
-const DEFAULT_XP_REWARDS = [
-  { minPct: 95, xp: 100 },
-  { minPct: 85, xp: 75 },
-  { minPct: 75, xp: 50 },
-  { minPct: 65, xp: 30 },
-  { minPct: 50, xp: 15 },
-  { minPct: 0, xp: 5 },
-];
-
-const DEFAULT_SUBJECT_LABELS: Record<string, string> = {
-  math: 'Mathematics', science: 'Science', english: 'English',
-  history: 'History', art: 'Art', pe: 'Physical Education', ict: 'ICT', music: 'Music',
-};
-
-type Toast = { type: 'success' | 'error'; message: string };
+import { settingsApi } from '../lib/api';
+import { Settings as SettingsIcon, Save, CheckCircle } from 'lucide-react';
 
 export default function Settings() {
+  const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'levels' | 'xp' | 'subjects' | 'maxmarks' | 'badgexp' | 'mentorxp' | 'reset' | 'demo'>('levels');
-  const [toast, setToast] = useState<Toast | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
-  const [levelThresholds, setLevelThresholds] = useState<number[]>(DEFAULT_LEVEL_THRESHOLDS);
-  const [xpRewards, setXpRewards] = useState(DEFAULT_XP_REWARDS);
-  const [subjectLabels, setSubjectLabels] = useState<Record<string, string>>(DEFAULT_SUBJECT_LABELS);
+  useEffect(() => { settingsApi.get().then(setSettings).finally(() => setLoading(false)); }, []);
 
-  const [subjectMaxMarks, setSubjectMaxMarks] = useState<Record<string, number>>(DEFAULT_SUBJECT_MAX_MARKS);
-
-  const [savingLevels, setSavingLevels] = useState(false);
-  const [savingXp, setSavingXp] = useState(false);
-  const [savingSubjects, setSavingSubjects] = useState(false);
-  const [savingMaxMarks, setSavingMaxMarks] = useState(false);
-
-  // Reset state
-  const [classes, setClasses] = useState<any[]>([]);
-  const [resetting, setResetting] = useState<string | null>(null);
-  const [resetConfirm, setResetConfirm] = useState<{ type: string; label: string; action: () => Promise<void> } | null>(null);
-
-  // Demo accounts state
-  const [demoAccounts, setDemoAccounts] = useState<any[]>([]);
-  const [savingDemo, setSavingDemo] = useState(false);
-
-  // Badge XP state
-  const [badgeXpList, setBadgeXpList] = useState<any[]>([]);
-  const [savingBadgeXp, setSavingBadgeXp] = useState(false);
-
-  // Mentor rating XP state
-  const DEFAULT_MENTOR_RATING_XP: Record<string, number> = { '1': 10, '2': 20, '3': 30, '4': 45, '5': 60 };
-  const [mentorRatingXp, setMentorRatingXp] = useState<Record<string, number>>(DEFAULT_MENTOR_RATING_XP);
-  const [savingMentorXp, setSavingMentorXp] = useState(false);
-
-  // New subject form state
-  const [newSubjectLabel, setNewSubjectLabel] = useState('');
-  const [newSubjectKey, setNewSubjectKey] = useState('');
-  const [newSubjectMaxMarks, setNewSubjectMaxMarks] = useState(100);
-  const [addingSubject, setAddingSubject] = useState(false);
-  const [removingSubject, setRemovingSubject] = useState<string | null>(null);
-
-  useEffect(() => {
-    Promise.all([
-      settingsApi.get(),
-      teamsApi.list(),
-      settingsApi.getDemoAccounts().catch(() => []),
-      gamificationApi.badges().catch(() => []),
-    ]).then(([data, cls, demo, bdgs]) => {
-      setLevelThresholds(data.levelThresholds ?? DEFAULT_LEVEL_THRESHOLDS);
-      setXpRewards(data.xpRewards ?? DEFAULT_XP_REWARDS);
-      setSubjectLabels(data.subjectLabels ?? DEFAULT_SUBJECT_LABELS);
-      setSubjectMaxMarks(data.subjectMaxMarks ?? DEFAULT_SUBJECT_MAX_MARKS);
-      setMentorRatingXp(data.mentorRatingXp ?? DEFAULT_MENTOR_RATING_XP);
-      setClasses(cls);
-      setBadgeXpList(bdgs);
-      setDemoAccounts(demo.length ? demo : [
-        { label: 'Admin', email: 'admin@eduanalytics.com', password: 'admin123', color: 'bg-purple-100 text-purple-700 border-purple-200' },
-        { label: 'Teacher', email: 'j.rodriguez@eduanalytics.com', password: 'teacher123', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-        { label: 'Student', email: 'student@eduanalytics.com', password: 'student123', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-        { label: 'Parent', email: 'parent@eduanalytics.com', password: 'parent123', color: 'bg-amber-100 text-amber-700 border-amber-200' },
-      ]);
-    }).catch(console.error).finally(() => setLoading(false));
-  }, []);
-
-  const showToast = (type: 'success' | 'error', message: string) => {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  const handleSaveLevels = async () => {
-    setSavingLevels(true);
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
     try {
-      await settingsApi.updateLevelThresholds(levelThresholds);
-      showToast('success', 'Level thresholds saved successfully');
-    } catch {
-      showToast('error', 'Failed to save level thresholds');
-    } finally { setSavingLevels(false); }
+      await settingsApi.update(settings);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err: any) { alert(err.message); }
+    finally { setSaving(false); }
   };
 
-  const handleSaveXp = async () => {
-    setSavingXp(true);
-    try {
-      await settingsApi.updateXpRewards(xpRewards);
-      showToast('success', 'XP rewards saved successfully');
-    } catch {
-      showToast('error', 'Failed to save XP rewards');
-    } finally { setSavingXp(false); }
-  };
+  const set = (key: string, value: string) => setSettings(p => ({ ...p, [key]: value }));
 
-  const handleSaveSubjects = async () => {
-    setSavingSubjects(true);
-    try {
-      await settingsApi.updateSubjectLabels(subjectLabels);
-      showToast('success', 'Subject labels saved successfully');
-    } catch {
-      showToast('error', 'Failed to save subject labels');
-    } finally { setSavingSubjects(false); }
-  };
-
-  const handleSaveMaxMarks = async () => {
-    setSavingMaxMarks(true);
-    try {
-      await settingsApi.updateSubjectMaxMarks(subjectMaxMarks);
-      showToast('success', 'Subject max marks saved successfully');
-    } catch {
-      showToast('error', 'Failed to save subject max marks');
-    } finally { setSavingMaxMarks(false); }
-  };
-
-  const totalMaxMarks = Object.values(subjectMaxMarks).reduce((a, b) => a + b, 0);
-
-  const doReset = async (type: string, label: string, action: () => Promise<void>) => {
-    setResetConfirm({ type, label, action });
-  };
-
-  const confirmReset = async () => {
-    if (!resetConfirm) return;
-    setResetting(resetConfirm.type);
-    setResetConfirm(null);
-    try {
-      await resetConfirm.action();
-      showToast('success', `Reset complete: ${resetConfirm.label}`);
-    } catch {
-      showToast('error', `Failed to reset: ${resetConfirm.label}`);
-    } finally { setResetting(null); }
-  };
-
-  const handleSaveBadgeXp = async () => {
-    setSavingBadgeXp(true);
-    try {
-      const updates = badgeXpList.map(b => ({ id: b.id, xpReward: b.xpReward }));
-      const updated = await gamificationApi.updateBadgeXpBulk(updates);
-      setBadgeXpList(updated);
-      showToast('success', 'Badge XP rewards saved successfully');
-    } catch {
-      showToast('error', 'Failed to save badge XP rewards');
-    } finally { setSavingBadgeXp(false); }
-  };
-
-  const generateKey = (label: string) =>
-    label.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/, '');
-
-  const handleAddSubject = async () => {
-    if (!newSubjectLabel.trim() || !newSubjectKey.trim()) return;
-    setAddingSubject(true);
-    try {
-      await settingsApi.addSubject(newSubjectKey, newSubjectLabel.trim(), newSubjectMaxMarks);
-      setSubjectLabels(prev => ({ ...prev, [newSubjectKey]: newSubjectLabel.trim() }));
-      setSubjectMaxMarks(prev => ({ ...prev, [newSubjectKey]: newSubjectMaxMarks }));
-      setNewSubjectLabel('');
-      setNewSubjectKey('');
-      setNewSubjectMaxMarks(100);
-      showToast('success', `Subject "${newSubjectLabel.trim()}" added successfully`);
-    } catch (err: any) {
-      showToast('error', err?.response?.data?.error ?? 'Failed to add subject');
-    } finally { setAddingSubject(false); }
-  };
-
-  const handleRemoveSubject = async (key: string) => {
-    setRemovingSubject(key);
-    try {
-      await settingsApi.removeSubject(key);
-      setSubjectLabels(prev => { const n = { ...prev }; delete n[key]; return n; });
-      setSubjectMaxMarks(prev => { const n = { ...prev }; delete n[key]; return n; });
-      showToast('success', `Subject "${key}" removed`);
-    } catch {
-      showToast('error', 'Failed to remove subject');
-    } finally { setRemovingSubject(null); }
-  };
-
-  const handleSaveMentorXp = async () => {
-    setSavingMentorXp(true);
-    try {
-      await settingsApi.updateMentorRatingXp(mentorRatingXp);
-      showToast('success', 'Mentor rating XP saved successfully');
-    } catch {
-      showToast('error', 'Failed to save mentor rating XP');
-    } finally { setSavingMentorXp(false); }
-  };
-
-  const handleSaveDemo = async () => {
-    setSavingDemo(true);
-    try {
-      await settingsApi.updateDemoAccounts(demoAccounts);
-      showToast('success', 'Demo accounts updated — changes appear on next login page load');
-    } catch {
-      showToast('error', 'Failed to save demo accounts');
-    } finally { setSavingDemo(false); }
-  };
-
-  const updateThreshold = (index: number, value: string) => {
-    const num = parseInt(value);
-    if (isNaN(num)) return;
-    setLevelThresholds(prev => prev.map((v, i) => i === index ? num : v));
-  };
-
-  const updateXpReward = (index: number, field: 'minPct' | 'xp', value: string) => {
-    const num = parseInt(value);
-    if (isNaN(num)) return;
-    setXpRewards(prev => prev.map((r, i) => i === index ? { ...r, [field]: num } : r));
-  };
-
-  if (loading) return <LoadingSpinner text="Loading settings..." />;
-
-  const tabs = [
-    { id: 'levels' as const, label: 'Level Thresholds', icon: <Trophy size={16} /> },
-    { id: 'xp' as const, label: 'Score XP Rewards', icon: <Zap size={16} /> },
-    { id: 'subjects' as const, label: 'Subject Labels', icon: <BookOpen size={16} /> },
-    { id: 'maxmarks' as const, label: 'Max Marks', icon: <Target size={16} /> },
-    { id: 'badgexp' as const, label: 'Badge XP', icon: <Award size={16} /> },
-    { id: 'mentorxp' as const, label: 'Mentor XP', icon: <Star size={16} /> },
-    { id: 'reset' as const, label: 'Reset Data', icon: <RotateCw size={16} /> },
-    ...(user?.role === 'admin' ? [{ id: 'demo' as const, label: 'Demo Accounts', icon: <Users size={16} /> }] : []),
-  ];
+  if (loading) return (
+    <div className="flex items-center justify-center h-48"><div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" /></div>
+  );
 
   return (
-    <div className="animate-fade-in">
-      {toast && (
-        <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-white text-sm font-medium animate-fade-in ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-500'}`}>
-          {toast.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-          {toast.message}
+    <div className="space-y-6 max-w-2xl">
+      <div>
+        <h1 className="page-title dark:text-white flex items-center gap-2"><SettingsIcon size={24} className="text-indigo-600" /> Settings</h1>
+        <p className="page-subtitle dark:text-slate-400">Configure your PrintShop Manager</p>
+      </div>
+
+      {saved && (
+        <div className="flex items-center gap-2 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl text-emerald-700 dark:text-emerald-400 text-sm font-medium">
+          <CheckCircle size={16} /> Settings saved successfully
         </div>
       )}
 
-      <div className="page-header">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 grad-primary rounded-xl flex items-center justify-center shadow-md">
-            <SettingsIcon size={20} className="text-white" />
+      <form onSubmit={handleSave} className="space-y-6">
+        <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+          <h2 className="section-title dark:text-white mb-4">Shop Information</h2>
+          <div className="space-y-4">
+            <div>
+              <label className="label dark:text-slate-300">Shop Name</label>
+              <input value={settings.shop_name ?? ''} onChange={e => set('shop_name', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="PrintShop Manager" />
+            </div>
+            <div>
+              <label className="label dark:text-slate-300">Address</label>
+              <textarea rows={2} value={settings.shop_address ?? ''} onChange={e => set('shop_address', e.target.value)} className="input resize-none dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="123 Print Street, Manila, Philippines" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label dark:text-slate-300">Phone</label>
+                <input value={settings.shop_phone ?? ''} onChange={e => set('shop_phone', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="+63 2 888 0000" />
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">Email</label>
+                <input type="email" value={settings.shop_email ?? ''} onChange={e => set('shop_email', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="info@printshop.ph" />
+              </div>
+            </div>
           </div>
+        </div>
+
+        <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+          <h2 className="section-title dark:text-white mb-4">Financial Settings</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label dark:text-slate-300">Currency</label>
+              <select value={settings.currency ?? 'PHP'} onChange={e => set('currency', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white">
+                <option value="PHP">PHP — Philippine Peso (₱)</option>
+                <option value="USD">USD — US Dollar ($)</option>
+                <option value="SGD">SGD — Singapore Dollar (S$)</option>
+              </select>
+            </div>
+            <div>
+              <label className="label dark:text-slate-300">Tax Rate (%)</label>
+              <input type="number" step="0.01" min="0" max="100" value={settings.tax_rate ?? '0'} onChange={e => set('tax_rate', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="0" />
+            </div>
+          </div>
+        </div>
+
+        <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+          <h2 className="section-title dark:text-white mb-4">Receipt Settings</h2>
           <div>
-            <h1 className="page-title">Platform Settings</h1>
-            <p className="page-subtitle">Configure level criteria, XP rewards, and subject labels</p>
+            <label className="label dark:text-slate-300">Receipt Footer Message</label>
+            <textarea rows={3} value={settings.receipt_footer ?? ''} onChange={e => set('receipt_footer', e.target.value)} className="input resize-none dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="Thank you for your business! Come again." />
           </div>
         </div>
-      </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-6">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
-              activeTab === tab.id ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            {tab.icon}
-            <span className="hidden sm:inline">{tab.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Level Thresholds */}
-      {activeTab === 'levels' && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Level XP Thresholds</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Set the total XP required to reach each level</p>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setLevelThresholds(DEFAULT_LEVEL_THRESHOLDS)} className="btn-secondary flex items-center gap-2 text-sm">
-                <RotateCcw size={14} /> Reset
-              </button>
-              <button onClick={handleSaveLevels} disabled={savingLevels} className="btn-primary flex items-center gap-2 text-sm">
-                <Save size={14} /> {savingLevels ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-3">
-            {levelThresholds.map((xp, index) => (
-              <div key={index} className="bg-slate-50 rounded-xl p-3">
-                <div className="text-xs font-bold text-primary-600 mb-2 flex items-center gap-1">
-                  <Trophy size={11} /> Level {index + 1}
-                </div>
-                <input
-                  type="number"
-                  value={xp}
-                  onChange={e => updateThreshold(index, e.target.value)}
-                  disabled={index === 0}
-                  min={0}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-                <div className="text-xs text-slate-400 text-center mt-1">XP required</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-4 p-3 bg-blue-50 rounded-xl">
-            <p className="text-xs text-blue-700">
-              <strong>Note:</strong> Level 1 always starts at 0 XP. Changes take effect for new score entries. Existing student levels will recalculate automatically when their XP is next updated.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* XP Rewards */}
-      {activeTab === 'xp' && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Score XP Reward Tiers</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Define how much XP students earn based on their score percentage</p>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setXpRewards(DEFAULT_XP_REWARDS)} className="btn-secondary flex items-center gap-2 text-sm">
-                <RotateCcw size={14} /> Reset
-              </button>
-              <button onClick={handleSaveXp} disabled={savingXp} className="btn-primary flex items-center gap-2 text-sm">
-                <Save size={14} /> {savingXp ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  <th className="table-header text-left py-3 px-4">Tier</th>
-                  <th className="table-header text-center py-3 px-4">Minimum Score %</th>
-                  <th className="table-header text-center py-3 px-4">XP Awarded</th>
-                  <th className="table-header text-left py-3 px-4">Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                {xpRewards.map((reward, index) => {
-                  const nextTier = xpRewards[index - 1];
-                  const maxPct = nextTier ? nextTier.minPct - 1 : 100;
-                  const tierLabel = index === 0 ? `${reward.minPct}% – 100%` : `${reward.minPct}% – ${maxPct}%`;
-                  return (
-                    <tr key={index} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                      <td className="py-3 px-4">
-                        <span className={`text-xs font-bold px-2 py-1 rounded-full ${
-                          index === 0 ? 'bg-emerald-100 text-emerald-700' :
-                          index === 1 ? 'bg-blue-100 text-blue-700' :
-                          index === 2 ? 'bg-primary-100 text-primary-700' :
-                          index === 3 ? 'bg-amber-100 text-amber-700' :
-                          index === 4 ? 'bg-orange-100 text-orange-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
-                          Tier {index + 1}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <input
-                          type="number"
-                          value={reward.minPct}
-                          onChange={e => updateXpReward(index, 'minPct', e.target.value)}
-                          disabled={index === xpRewards.length - 1}
-                          min={0} max={100}
-                          className="w-20 text-center border border-slate-200 rounded-lg px-2 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                        />
-                        <span className="text-slate-400 ml-1 text-sm">%</span>
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <input
-                          type="number"
-                          value={reward.xp}
-                          onChange={e => updateXpReward(index, 'xp', e.target.value)}
-                          min={0}
-                          className="w-20 text-center border border-slate-200 rounded-lg px-2 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                        <span className="text-slate-400 ml-1 text-sm">XP</span>
-                      </td>
-                      <td className="py-3 px-4 text-sm text-slate-500">{tierLabel}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-4 p-3 bg-amber-50 rounded-xl">
-            <p className="text-xs text-amber-700">
-              <strong>Note:</strong> Tiers are evaluated from highest to lowest percentage. The last tier is the fallback (applies to all remaining scores). Changes affect new scores only — existing XP is not retroactively adjusted.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Subject Labels */}
-      {activeTab === 'subjects' && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Subject Display Labels</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Customise how subject names appear across the platform</p>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setSubjectLabels(DEFAULT_SUBJECT_LABELS)} className="btn-secondary flex items-center gap-2 text-sm">
-                <RotateCcw size={14} /> Reset
-              </button>
-              <button onClick={handleSaveSubjects} disabled={savingSubjects} className="btn-primary flex items-center gap-2 text-sm">
-                <Save size={14} /> {savingSubjects ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {Object.keys(subjectLabels).map(key => (
-              <div key={key} className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
-                <div className="w-16 text-xs font-bold text-slate-500 uppercase tracking-wider flex-shrink-0">{key}</div>
-                <div className="text-slate-300 flex-shrink-0">→</div>
-                <input
-                  type="text"
-                  value={subjectLabels[key] ?? key}
-                  onChange={e => setSubjectLabels(prev => ({ ...prev, [key]: e.target.value }))}
-                  className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 min-w-0"
-                  placeholder={`Display name for ${key}`}
-                />
-                <button
-                  onClick={() => handleRemoveSubject(key)}
-                  disabled={removingSubject === key}
-                  title="Remove subject"
-                  className="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
-                >
-                  {removingSubject === key
-                    ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                    : <Trash2 size={14} />}
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {/* Add new subject form */}
-          <div className="mt-5 border border-dashed border-slate-300 rounded-xl p-4">
-            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-              <Plus size={13} /> Add New Subject
-            </p>
-            <div className="grid sm:grid-cols-3 gap-3">
-              <div className="sm:col-span-1">
-                <label className="text-xs text-slate-500 mb-1 block">Subject Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Chemistry"
-                  value={newSubjectLabel}
-                  onChange={e => {
-                    setNewSubjectLabel(e.target.value);
-                    setNewSubjectKey(generateKey(e.target.value));
-                  }}
-                  className="input text-sm py-2 w-full"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 mb-1 block">Key (auto-generated)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. chemistry"
-                  value={newSubjectKey}
-                  onChange={e => setNewSubjectKey(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                  className="input text-sm py-2 w-full font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 mb-1 block">Max Marks</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={10000}
-                  value={newSubjectMaxMarks}
-                  onChange={e => setNewSubjectMaxMarks(parseInt(e.target.value) || 100)}
-                  className="input text-sm py-2 w-full"
-                />
-              </div>
-            </div>
-            <button
-              onClick={handleAddSubject}
-              disabled={addingSubject || !newSubjectLabel.trim() || !newSubjectKey.trim()}
-              className="mt-3 btn-primary flex items-center gap-2 text-sm px-4 py-2 disabled:opacity-50"
-            >
-              {addingSubject ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Plus size={14} />}
-              Add Subject
-            </button>
-          </div>
-
-          <div className="mt-4 p-3 bg-blue-50 rounded-xl">
-            <p className="text-xs text-blue-700">
-              <strong>Note:</strong> These labels are used for display across the platform. The key is the internal identifier stored in the database. Removing a subject hides it from new assignments but does not delete existing scores or assessments.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Subject Max Marks */}
-      {activeTab === 'maxmarks' && (
-        <div className="space-y-6">
-          <div className="card">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Subject Max Marks</h2>
-                <p className="text-sm text-slate-500 mt-0.5">
-                  Set the maximum obtainable marks per subject for the leaderboard.
-                  Overall max = <strong>{totalMaxMarks}</strong> total marks.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => setSubjectMaxMarks(DEFAULT_SUBJECT_MAX_MARKS)} className="btn-secondary flex items-center gap-2 text-sm">
-                  <RotateCcw size={14} /> Reset
-                </button>
-                <button onClick={handleSaveMaxMarks} disabled={savingMaxMarks} className="btn-primary flex items-center gap-2 text-sm">
-                  <Save size={14} /> {savingMaxMarks ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {SUBJECT_KEYS.map(key => (
-                <div key={key} className="flex items-center gap-4 bg-slate-50 rounded-xl p-4">
-                  <div className="w-20 text-xs font-bold text-slate-500 uppercase tracking-wider">{key}</div>
-                  <input
-                    type="number" min={1}
-                    value={subjectMaxMarks[key] ?? 100}
-                    onChange={e => {
-                      const v = parseInt(e.target.value);
-                      if (!isNaN(v) && v > 0) setSubjectMaxMarks(prev => ({ ...prev, [key]: v }));
-                    }}
-                    className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-900 bg-white text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                  <span className="text-slate-400 text-sm">marks</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="p-3 bg-primary-50 rounded-xl text-center">
-                <div className="text-2xl font-black text-primary-700">{totalMaxMarks}</div>
-                <div className="text-xs text-primary-600 mt-0.5">Total overall max marks</div>
-              </div>
-              <div className="p-3 bg-amber-50 rounded-xl text-center">
-                <div className="text-2xl font-black text-amber-700">{SUBJECT_KEYS.length}</div>
-                <div className="text-xs text-amber-600 mt-0.5">Subjects configured</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Rank badge XP bonus table */}
-          <div className="card">
-            <h2 className="text-lg font-bold text-slate-900 mb-1">Rank Badge XP Bonuses</h2>
-            <p className="text-sm text-slate-500 mb-5">
-              Students who maintain high performance receive automatic bonus XP on every score they record.
-            </p>
-            <div className="space-y-3">
-              {[
-                { badge: '💎 Diamond Gem', pct: '≥ 95%', bonus: '+10% XP', bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-700' },
-                { badge: '🥇 Golden Ticket', pct: '≥ 85%', bonus: '+5% XP', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700' },
-                { badge: '🎫 Ticket', pct: '≥ 70%', bonus: '+3% XP', bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700' },
-                { badge: '⭐ Star', pct: '≥ 50%', bonus: '+2% XP', bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700' },
-              ].map(r => (
-                <div key={r.badge} className={`flex items-center justify-between px-4 py-3 rounded-xl border ${r.bg} ${r.border}`}>
-                  <span className={`font-semibold text-sm ${r.text}`}>{r.badge}</span>
-                  <span className="text-xs text-slate-500">{r.pct} average</span>
-                  <span className={`text-sm font-black ${r.text}`}>{r.bonus}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 p-3 bg-slate-50 rounded-xl">
-              <p className="text-xs text-slate-500">
-                <strong>How it works:</strong> When a student records a new score, the system checks their current overall average. If they're in a badge tier, the bonus percentage is automatically added on top of their base XP reward. For example, a Diamond student scoring 95/100 earns 100 base XP × 1.10 = 110 XP.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Badge XP Rewards */}
-      {activeTab === 'badgexp' && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Badge XP Rewards</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Set how many XP points each achievement badge grants when earned</p>
-            </div>
-            <button onClick={handleSaveBadgeXp} disabled={savingBadgeXp} className="btn-primary flex items-center gap-2 text-sm">
-              <Save size={14} /> {savingBadgeXp ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-
-          {badgeXpList.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-8">No badges found</p>
-          ) : (
-            <div className="space-y-3">
-              {badgeXpList.map(badge => (
-                <div key={badge.id} className="flex items-center gap-4 p-4 rounded-xl border border-slate-200 hover:border-primary-200 hover:bg-primary-50/30 transition-all">
-                  <div className="text-2xl w-10 text-center flex-shrink-0">{badge.icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-slate-900 text-sm">{badge.name}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">{badge.description}</div>
-                    <div className="mt-1">
-                      <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 capitalize">{badge.category}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <label className="text-xs font-semibold text-slate-500 whitespace-nowrap">XP Reward</label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        min={0}
-                        max={10000}
-                        value={badge.xpReward}
-                        onChange={e => {
-                          const val = parseInt(e.target.value) || 0;
-                          setBadgeXpList(prev => prev.map(b => b.id === badge.id ? { ...b, xpReward: val } : b));
-                        }}
-                        className="input w-24 text-right font-bold text-primary-700 pr-8"
-                      />
-                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-primary-400 pointer-events-none">XP</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-5 p-3 bg-blue-50 rounded-xl">
-            <p className="text-xs text-blue-700">
-              <strong>Note:</strong> Changing XP rewards only affects badges earned from this point forward — previously awarded badges are not retroactively adjusted.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Mentor Rating XP */}
-      {activeTab === 'mentorxp' && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Mentor Rating XP</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Set how many XP points a student earns when they rate a completed mentor session</p>
-            </div>
-            <button
-              onClick={handleSaveMentorXp}
-              disabled={savingMentorXp}
-              className="btn-primary flex items-center gap-2 text-sm px-4 py-2"
-            >
-              {savingMentorXp ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={14} />}
-              Save
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {[1, 2, 3, 4, 5].map(star => (
-              <div key={star} className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl">
-                <div className="flex items-center gap-1 w-28 flex-shrink-0">
-                  {Array.from({ length: star }).map((_, i) => (
-                    <Star key={i} size={16} className="fill-amber-400 text-amber-400" />
-                  ))}
-                  {Array.from({ length: 5 - star }).map((_, i) => (
-                    <Star key={i} size={16} className="text-slate-300" />
-                  ))}
-                </div>
-                <span className="text-sm text-slate-600 w-16">{star} star{star > 1 ? 's' : ''}</span>
-                <div className="flex items-center gap-2 flex-1">
-                  <input
-                    type="number"
-                    min={0}
-                    max={999}
-                    value={mentorRatingXp[star.toString()] ?? 0}
-                    onChange={e => {
-                      const val = parseInt(e.target.value);
-                      if (!isNaN(val) && val >= 0)
-                        setMentorRatingXp(prev => ({ ...prev, [star.toString()]: val }));
-                    }}
-                    className="input w-24 py-1.5 text-sm text-center"
-                  />
-                  <span className="text-sm text-slate-500">XP</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-4 p-3 bg-blue-50 rounded-xl">
-            <p className="text-xs text-blue-700">
-              <strong>How it works:</strong> When a student submits a rating for a completed mentor session, they automatically receive the XP shown here based on the star rating they gave.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Reset Data */}
-      {activeTab === 'reset' && (
-        <div className="space-y-6">
-          {/* Reset confirm overlay */}
-          {resetConfirm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setResetConfirm(null)} />
-              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in p-6">
-                <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <ShieldAlert size={26} className="text-red-600" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-900 text-center mb-2">Confirm Reset</h3>
-                <p className="text-sm text-slate-600 text-center mb-1">You are about to permanently delete:</p>
-                <p className="font-bold text-red-700 text-center text-sm mb-5">{resetConfirm.label}</p>
-                <p className="text-xs text-slate-500 text-center mb-5">This action <strong>cannot be undone</strong>. All affected scores and XP will be wiped.</p>
-                <div className="flex gap-3">
-                  <button onClick={() => setResetConfirm(null)} className="flex-1 btn-secondary">Cancel</button>
-                  <button onClick={confirmReset} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2.5 rounded-xl transition-colors">
-                    Yes, Reset
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Per-student reset */}
-          <div className="card">
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
-                <RotateCw size={18} className="text-orange-600" />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Reset by Subject</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Delete all scores for one subject across every student and recalculate XP</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {SUBJECT_KEYS.map(sub => (
-                <button
-                  key={sub}
-                  disabled={!!resetting}
-                  onClick={() => doReset(
-                    `subject_${sub}`,
-                    `All ${sub} scores for every student`,
-                    () => scoresApi.resetSubject(sub)
-                  )}
-                  className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 disabled:opacity-50 text-sm font-semibold transition-all"
-                >
-                  <span className="uppercase">{sub}</span>
-                  {resetting === `subject_${sub}` ? (
-                    <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-                  ) : <Trash2 size={13} />}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Per-class reset */}
-          <div className="card">
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
-                <Users size={18} className="text-red-600" />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Reset by Class</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Delete all scores and reset XP to 0 for every student in a class</p>
-              </div>
-            </div>
-            {classes.length === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-4">No classes found</p>
-            ) : (
-              <div className="space-y-2">
-                {classes.map(cls => (
-                  <div key={cls.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-red-200 hover:bg-red-50/50 transition-all group">
-                    <div>
-                      <div className="font-semibold text-slate-900 text-sm">{cls.name}</div>
-                      <div className="text-xs text-slate-400">Grade {cls.grade} · {cls.studentCount ?? 0} students</div>
-                    </div>
-                    <button
-                      disabled={!!resetting}
-                      onClick={() => doReset(
-                        `class_${cls.id}`,
-                        `All scores + XP for ${cls.name} (${cls.studentCount ?? 0} students)`,
-                        () => scoresApi.resetClass(cls.id)
-                      )}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-100 text-red-700 hover:bg-red-600 hover:text-white border border-red-200 text-xs font-semibold transition-all disabled:opacity-50"
-                    >
-                      {resetting === `class_${cls.id}` ? (
-                        <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                      ) : <RotateCw size={12} />}
-                      Reset Class
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
-            <p className="text-xs text-amber-800">
-              <strong>Note:</strong> To reset an individual student's scores and XP, go to the <strong>Students</strong> page → open the student → use the Reset button in their profile. Class and subject resets are permanent and cannot be reversed.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Demo Accounts (admin only) */}
-      {activeTab === 'demo' && user?.role === 'admin' && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Login Page Demo Accounts</h2>
-              <p className="text-sm text-slate-500 mt-0.5">Customize the quick-login shortcut buttons shown on the login page</p>
-            </div>
-            <button onClick={handleSaveDemo} disabled={savingDemo} className="btn-primary flex items-center gap-2 text-sm">
-              <Save size={14} /> {savingDemo ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {demoAccounts.map((acc, i) => (
-              <div key={i} className="grid grid-cols-[1fr_1.5fr_1.5fr_auto] gap-3 items-center p-3 bg-slate-50 rounded-xl">
-                <input
-                  type="text" value={acc.label} placeholder="Label"
-                  onChange={e => setDemoAccounts(prev => prev.map((a, j) => j === i ? { ...a, label: e.target.value } : a))}
-                  className="input text-sm py-2"
-                />
-                <input
-                  type="email" value={acc.email} placeholder="Email"
-                  onChange={e => setDemoAccounts(prev => prev.map((a, j) => j === i ? { ...a, email: e.target.value } : a))}
-                  className="input text-sm py-2"
-                />
-                <input
-                  type="text" value={acc.password} placeholder="Password"
-                  onChange={e => setDemoAccounts(prev => prev.map((a, j) => j === i ? { ...a, password: e.target.value } : a))}
-                  className="input text-sm py-2"
-                />
-                <button
-                  onClick={() => setDemoAccounts(prev => prev.filter((_, j) => j !== i))}
-                  className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {demoAccounts.length < 8 && (
-            <button
-              onClick={() => setDemoAccounts(prev => [...prev, { label: 'New Account', email: '', password: '', color: 'bg-slate-100 text-slate-700 border-slate-200' }])}
-              className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-slate-300 text-slate-600 hover:border-primary-300 hover:text-primary-700 text-sm font-semibold transition-all w-full justify-center"
-            >
-              <Plus size={15} /> Add Demo Account
-            </button>
-          )}
-
-          <div className="mt-4 p-3 bg-blue-50 rounded-xl">
-            <p className="text-xs text-blue-700">
-              <strong>Note:</strong> These credentials are shown as shortcut buttons on the login page. Changing them here does <em>not</em> change the actual account passwords — use the profile editor (click your avatar) to change account passwords.
-            </p>
-          </div>
-        </div>
-      )}
+        <button type="submit" disabled={saving} className="btn-primary flex items-center gap-2">
+          <Save size={16} /> {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+      </form>
     </div>
   );
 }

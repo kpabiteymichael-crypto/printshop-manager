@@ -16,7 +16,7 @@ const logger = winston.createLogger({
       ? json()
       : combine(colorize(), devFormat)
   ),
-  defaultMeta: { service: 'eduanalytics-api' },
+  defaultMeta: { service: 'printshop-api' },
   transports: [
     new winston.transports.Console(),
   ],

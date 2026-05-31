@@ -5,35 +5,36 @@ import { eq, desc } from 'drizzle-orm';
 import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
+router.use(authenticate);
 
-router.get('/', authenticate, async (req: AuthRequest, res) => {
+router.get('/', async (req: AuthRequest, res) => {
   try {
-    const result = await db.select().from(notifications)
+    const list = await db.select().from(notifications)
       .where(eq(notifications.userId, req.user!.id))
       .orderBy(desc(notifications.createdAt))
-      .limit(20);
-    return res.json(result);
-  } catch {
-    return res.status(500).json({ error: 'Failed to fetch notifications' });
-  }
+      .limit(50);
+    return res.json(list);
+  } catch { return res.status(500).json({ error: 'Failed to fetch notifications' }); }
 });
 
-router.patch('/:id/read', authenticate, async (req, res) => {
+router.patch('/:id/read', async (req: AuthRequest, res) => {
   try {
-    await db.update(notifications).set({ isRead: true }).where(eq(notifications.id, parseInt(req.params.id)));
+    const { and } = await import('drizzle-orm');
+    const result = await db.update(notifications).set({ isRead: true })
+      .where(and(
+        eq(notifications.id, Number(req.params.id)),
+        eq(notifications.userId, req.user!.id)
+      ));
     return res.json({ success: true });
-  } catch {
-    return res.status(500).json({ error: 'Failed to mark notification' });
-  }
+  } catch { return res.status(500).json({ error: 'Failed to mark as read' }); }
 });
 
-router.patch('/read-all', authenticate, async (req: AuthRequest, res) => {
+router.patch('/read-all', async (req: AuthRequest, res) => {
   try {
-    await db.update(notifications).set({ isRead: true }).where(eq(notifications.userId, req.user!.id));
+    await db.update(notifications).set({ isRead: true })
+      .where(eq(notifications.userId, req.user!.id));
     return res.json({ success: true });
-  } catch {
-    return res.status(500).json({ error: 'Failed to mark all notifications' });
-  }
+  } catch { return res.status(500).json({ error: 'Failed to mark all read' }); }
 });
 
 export default router;

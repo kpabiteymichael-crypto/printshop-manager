@@ -1,282 +1,94 @@
 import { Router } from 'express';
 import { db } from '../db/index';
-import { sql } from 'drizzle-orm';
-import { authenticate, authorize } from '../middleware/auth';
+import { settings, users } from '../db/schema';
+import { eq, sql } from 'drizzle-orm';
+import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
 
 const router = Router();
+router.use(authenticate);
 
-export const DEFAULT_LEVEL_THRESHOLDS = [
-  0, 100, 250, 500, 850, 1300, 1900, 2650, 3600, 4800,
-  6300, 8150, 10400, 13100, 16300, 20050, 24400, 29400, 35100, 41550,
-];
-
-export const DEFAULT_XP_REWARDS = [
-  { minPct: 95, xp: 100 },
-  { minPct: 85, xp: 75 },
-  { minPct: 75, xp: 50 },
-  { minPct: 65, xp: 30 },
-  { minPct: 50, xp: 15 },
-  { minPct: 0, xp: 5 },
-];
-
-export const DEFAULT_DEMO_ACCOUNTS = [
-  { label: 'Admin', email: 'admin@eduanalytics.com', password: 'admin123', color: 'bg-purple-100 text-purple-700 border-purple-200' },
-  { label: 'Teacher', email: 'j.rodriguez@eduanalytics.com', password: 'teacher123', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-  { label: 'Student', email: 'student@eduanalytics.com', password: 'student123', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-  { label: 'Parent', email: 'parent@eduanalytics.com', password: 'parent123', color: 'bg-amber-100 text-amber-700 border-amber-200' },
-];
-
-export const DEFAULT_SUBJECT_LABELS: Record<string, string> = {
-  math: 'Mathematics',
-  science: 'Science',
-  english: 'English',
-  history: 'History',
-  art: 'Art',
-  pe: 'Physical Education',
-  ict: 'ICT',
-  music: 'Music',
-};
-
-export const SUBJECT_KEYS = ['math', 'science', 'english', 'history', 'art', 'pe', 'ict', 'music'] as const;
-
-export const DEFAULT_SUBJECT_MAX_MARKS: Record<string, number> = {
-  math: 100, science: 100, english: 100, history: 100,
-  art: 100, pe: 100, ict: 100, music: 100,
-};
-
-// Rank badge XP bonus percentages (fixed per spec)
-export const RANK_BADGE_BONUSES = {
-  diamond: 0.10, // ≥95% → +10% XP
-  gold: 0.05,    // ≥85% → +5% XP
-  ticket: 0.03,  // ≥70% → +3% XP
-  star: 0.02,    // ≥50% → +2% XP
-  none: 0,
-};
-
-export const DEFAULT_MENTOR_RATING_XP: Record<string, number> = {
-  '1': 10,
-  '2': 20,
-  '3': 30,
-  '4': 45,
-  '5': 60,
-};
-
-export function getRankBadgeBonusMultiplier(avgPct: number): number {
-  if (avgPct >= 95) return RANK_BADGE_BONUSES.diamond;
-  if (avgPct >= 85) return RANK_BADGE_BONUSES.gold;
-  if (avgPct >= 70) return RANK_BADGE_BONUSES.ticket;
-  if (avgPct >= 50) return RANK_BADGE_BONUSES.star;
-  return RANK_BADGE_BONUSES.none;
-}
-
-export async function getSetting(key: string): Promise<string | null> {
-  const result = await db.execute(sql`SELECT value FROM settings WHERE key = ${key}`);
-  const rows = (result as any).rows ?? result;
-  return (rows[0] as any)?.value ?? null;
-}
-
-export async function setSetting(key: string, value: string): Promise<void> {
-  await db.execute(sql`
-    INSERT INTO settings (key, value, updated_at) VALUES (${key}, ${value}, NOW())
-    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-  `);
-}
-
-export async function getSettingJson<T>(key: string, defaultValue: T): Promise<T> {
-  const raw = await getSetting(key);
-  if (!raw) return defaultValue;
-  try { return JSON.parse(raw); } catch { return defaultValue; }
-}
-
-export function calculateScoreXPFromRewards(score: number, maxScore: number, rewards: typeof DEFAULT_XP_REWARDS): number {
-  const pct = (score / maxScore) * 100;
-  const sorted = [...rewards].sort((a, b) => b.minPct - a.minPct);
-  for (const tier of sorted) {
-    if (pct >= tier.minPct) return tier.xp;
-  }
-  return 5;
-}
-
-export function getLevelFromThresholds(xp: number, thresholds: number[]): number {
-  let level = 1;
-  for (let i = 0; i < thresholds.length; i++) {
-    if (xp >= thresholds[i]) level = i + 1;
-    else break;
-  }
-  return level;
-}
-
-// GET /api/settings
-router.get('/', authenticate, authorize('admin', 'teacher'), async (_req, res) => {
+router.get('/', async (_req, res) => {
   try {
-    const [levelThresholds, xpRewards, subjectLabels, subjectMaxMarks, mentorRatingXp] = await Promise.all([
-      getSettingJson('level_thresholds', DEFAULT_LEVEL_THRESHOLDS),
-      getSettingJson('xp_rewards', DEFAULT_XP_REWARDS),
-      getSettingJson('subject_labels', DEFAULT_SUBJECT_LABELS),
-      getSettingJson('subject_max_marks', DEFAULT_SUBJECT_MAX_MARKS),
-      getSettingJson('mentor_rating_xp', DEFAULT_MENTOR_RATING_XP),
-    ]);
-    return res.json({ levelThresholds, xpRewards, subjectLabels, subjectMaxMarks, mentorRatingXp, rankBadgeBonuses: RANK_BADGE_BONUSES });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Failed to fetch settings' });
-  }
+    const rows = await db.select().from(settings);
+    const obj: Record<string, string> = {};
+    rows.forEach(r => { obj[r.key] = r.value; });
+    return res.json(obj);
+  } catch { return res.status(500).json({ error: 'Failed to fetch settings' }); }
 });
 
-// PUT /api/settings/level-thresholds
-router.put('/level-thresholds', authenticate, authorize('admin', 'teacher'), async (req, res) => {
+router.put('/', authorize('owner'), async (req, res) => {
   try {
-    const { thresholds } = z.object({
-      thresholds: z.array(z.number().min(0)).min(2).max(30),
-    }).parse(req.body);
-    await setSetting('level_thresholds', JSON.stringify(thresholds));
-    return res.json({ success: true, thresholds });
-  } catch (err: any) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
-    return res.status(500).json({ error: 'Failed to update level thresholds' });
-  }
-});
-
-// PUT /api/settings/xp-rewards
-router.put('/xp-rewards', authenticate, authorize('admin', 'teacher'), async (req, res) => {
-  try {
-    const { rewards } = z.object({
-      rewards: z.array(z.object({ minPct: z.number().min(0).max(100), xp: z.number().min(0) })).min(1),
-    }).parse(req.body);
-    await setSetting('xp_rewards', JSON.stringify(rewards));
-    return res.json({ success: true, rewards });
-  } catch (err: any) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
-    return res.status(500).json({ error: 'Failed to update XP rewards' });
-  }
-});
-
-// PUT /api/settings/subject-labels
-router.put('/subject-labels', authenticate, authorize('admin', 'teacher'), async (req, res) => {
-  try {
-    const { labels } = z.object({ labels: z.record(z.string()) }).parse(req.body);
-    await setSetting('subject_labels', JSON.stringify(labels));
-    return res.json({ success: true, labels });
-  } catch (err: any) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
-    return res.status(500).json({ error: 'Failed to update subject labels' });
-  }
-});
-
-// GET /api/settings/demo-accounts (public — needed on login page)
-router.get('/demo-accounts', async (_req, res) => {
-  try {
-    const accounts = await getSettingJson('demo_accounts', DEFAULT_DEMO_ACCOUNTS);
-    return res.json(accounts);
-  } catch {
-    return res.json(DEFAULT_DEMO_ACCOUNTS);
-  }
-});
-
-// PUT /api/settings/demo-accounts
-router.put('/demo-accounts', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { accounts } = z.object({
-      accounts: z.array(z.object({
-        label: z.string().min(1),
-        email: z.string().email(),
-        password: z.string().min(1),
-        color: z.string(),
-      })).min(1).max(10),
-    }).parse(req.body);
-    await setSetting('demo_accounts', JSON.stringify(accounts));
-    return res.json({ success: true, accounts });
-  } catch (err: any) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
-    return res.status(500).json({ error: 'Failed to update demo accounts' });
-  }
-});
-
-// PUT /api/settings/subject-max-marks
-router.put('/subject-max-marks', authenticate, authorize('admin', 'teacher'), async (req, res) => {
-  try {
-    const { marks } = z.object({ marks: z.record(z.number().min(1)) }).parse(req.body);
-    await setSetting('subject_max_marks', JSON.stringify(marks));
-    return res.json({ success: true, marks });
-  } catch (err: any) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
-    return res.status(500).json({ error: 'Failed to update subject max marks' });
-  }
-});
-
-// GET /api/settings/subjects — dynamic list of all subject keys + labels
-router.get('/subjects', authenticate, async (_req, res) => {
-  try {
-    const labels = await getSettingJson('subject_labels', DEFAULT_SUBJECT_LABELS);
-    return res.json(Object.entries(labels).map(([key, label]) => ({ key, label })));
-  } catch {
-    return res.status(500).json({ error: 'Failed to get subjects' });
-  }
-});
-
-// POST /api/settings/subjects — add a new custom subject
-router.post('/subjects', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { key, label, maxMarks } = z.object({
-      key: z.string().min(1).max(30).regex(/^[a-z0-9_]+$/, 'Key must be lowercase letters, digits, or underscores only'),
-      label: z.string().min(1).max(100),
-      maxMarks: z.number().min(1).max(10000).optional().default(100),
-    }).parse(req.body);
-
-    const [currentLabels, currentMarks] = await Promise.all([
-      getSettingJson('subject_labels', DEFAULT_SUBJECT_LABELS),
-      getSettingJson('subject_max_marks', DEFAULT_SUBJECT_MAX_MARKS),
-    ]);
-
-    if (Object.prototype.hasOwnProperty.call(currentLabels, key)) {
-      return res.status(400).json({ error: `Subject key "${key}" already exists` });
+    const updates = req.body as Record<string, string>;
+    for (const [key, value] of Object.entries(updates)) {
+      await db.insert(settings).values({ key, value })
+        .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: new Date() } });
     }
-
-    (currentLabels as Record<string, string>)[key] = label;
-    (currentMarks as Record<string, number>)[key] = maxMarks;
-
-    await Promise.all([
-      setSetting('subject_labels', JSON.stringify(currentLabels)),
-      setSetting('subject_max_marks', JSON.stringify(currentMarks)),
-    ]);
-
-    return res.status(201).json({ success: true, key, label, maxMarks });
-  } catch (err: any) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors[0]?.message ?? 'Invalid input' });
-    return res.status(500).json({ error: 'Failed to add subject' });
-  }
-});
-
-// DELETE /api/settings/subjects/:key — remove a subject
-router.delete('/subjects/:key', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const key = req.params.key;
-    const [currentLabels, currentMarks] = await Promise.all([
-      getSettingJson('subject_labels', DEFAULT_SUBJECT_LABELS),
-      getSettingJson('subject_max_marks', DEFAULT_SUBJECT_MAX_MARKS),
-    ]);
-    delete (currentLabels as Record<string, string>)[key];
-    delete (currentMarks as Record<string, number>)[key];
-    await Promise.all([
-      setSetting('subject_labels', JSON.stringify(currentLabels)),
-      setSetting('subject_max_marks', JSON.stringify(currentMarks)),
-    ]);
     return res.json({ success: true });
-  } catch (err) {
-    return res.status(500).json({ error: 'Failed to remove subject' });
-  }
+  } catch { return res.status(500).json({ error: 'Failed to update settings' }); }
 });
 
-// PUT /api/settings/mentor-rating-xp
-router.put('/mentor-rating-xp', authenticate, authorize('admin'), async (req, res) => {
+router.get('/staff', authorize('owner', 'manager'), async (_req, res) => {
   try {
-    const { xp } = z.object({ xp: z.record(z.number().min(0)) }).parse(req.body);
-    await setSetting('mentor_rating_xp', JSON.stringify(xp));
-    return res.json({ success: true, xp });
+    const staff = await db.select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      phone: users.phone,
+      isActive: users.isActive,
+      createdAt: users.createdAt,
+    }).from(users);
+    return res.json(staff);
+  } catch { return res.status(500).json({ error: 'Failed to fetch staff' }); }
+});
+
+router.post('/staff', authorize('owner'), async (req, res) => {
+  try {
+    const data = z.object({
+      name: z.string().min(2),
+      email: z.string().email(),
+      password: z.string().min(6),
+      role: z.enum(['owner', 'manager', 'cashier', 'print_operator', 'inventory_officer']),
+      phone: z.string().optional(),
+    }).parse(req.body);
+
+    const exists = await db.select({ id: users.id }).from(users).where(eq(users.email, data.email)).limit(1);
+    if (exists.length > 0) return res.status(400).json({ error: 'Email already registered' });
+
+    const passwordHash = await bcrypt.hash(data.password, 12);
+    const [user] = await db.insert(users).values({ ...data, passwordHash }).returning();
+    return res.status(201).json({ id: user.id, name: user.name, email: user.email, role: user.role });
   } catch (err: any) {
     if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
-    return res.status(500).json({ error: 'Failed to update mentor rating XP' });
+    return res.status(500).json({ error: 'Failed to create staff' });
+  }
+});
+
+router.put('/staff/:id', authorize('owner'), async (req, res) => {
+  try {
+    const data = z.object({
+      name: z.string().min(2).optional(),
+      role: z.enum(['owner', 'manager', 'cashier', 'print_operator', 'inventory_officer']).optional(),
+      phone: z.string().optional(),
+      isActive: z.boolean().optional(),
+      newPassword: z.string().min(6).optional(),
+    }).parse(req.body);
+
+    const updates: any = { updatedAt: new Date() };
+    if (data.name) updates.name = data.name;
+    if (data.role) updates.role = data.role;
+    if (data.phone !== undefined) updates.phone = data.phone;
+    if (data.isActive !== undefined) updates.isActive = data.isActive;
+    if (data.newPassword) updates.passwordHash = await bcrypt.hash(data.newPassword, 12);
+
+    const [user] = await db.update(users).set(updates).where(eq(users.id, Number(req.params.id))).returning();
+    if (!user) return res.status(404).json({ error: 'Staff member not found' });
+    return res.json({ id: user.id, name: user.name, email: user.email, role: user.role, isActive: user.isActive });
+  } catch (err: any) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
+    return res.status(500).json({ error: 'Failed to update staff' });
   }
 });
 

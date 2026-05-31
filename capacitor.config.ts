@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.eduanalytics.app',
-  appName: 'EduAnalytics',
+  appId: 'com.printshop.manager',
+  appName: 'PrintShop Manager',
   webDir: 'dist/client',
   bundledWebRuntime: false,
   server: {
@@ -16,7 +16,7 @@ const config: CapacitorConfig = {
   plugins: {
     SplashScreen: {
       launchShowDuration: 2000,
-      backgroundColor: '#4f46e5',
+      backgroundColor: '#1a2035',
       showSpinner: false,
     },
     StatusBar: {

@@ -1,143 +1,301 @@
 import {
-  pgTable, serial, text, integer, real, boolean, timestamp,
+  pgTable, serial, text, integer, real, boolean, timestamp, decimal,
   pgEnum, uniqueIndex, index,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // ─── Enums ───────────────────────────────────────────────
-export const userRoleEnum = pgEnum('user_role', ['admin', 'teacher', 'student', 'parent']);
-export const subjectEnum = pgEnum('subject', ['math', 'science', 'english', 'history', 'art', 'pe', 'ict', 'music']);
-export const badgeCategoryEnum = pgEnum('badge_category', ['academic', 'streak', 'improvement', 'social', 'milestone']);
-export const riskLevelEnum = pgEnum('risk_level', ['low', 'medium', 'high', 'critical']);
+export const userRoleEnum = pgEnum('user_role', ['owner', 'manager', 'cashier', 'print_operator', 'inventory_officer']);
+export const printJobStatusEnum = pgEnum('print_job_status', ['pending', 'in_progress', 'completed', 'cancelled']);
+export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'card', 'transfer', 'gcash', 'maya', 'credit']);
+export const movementTypeEnum = pgEnum('movement_type', ['in', 'out', 'adjustment']);
+export const cashSessionStatusEnum = pgEnum('cash_session_status', ['open', 'closed']);
+export const poStatusEnum = pgEnum('po_status', ['draft', 'ordered', 'partial', 'received', 'cancelled']);
 
 // ─── Users ───────────────────────────────────────────────
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   email: text('email').notNull(),
   passwordHash: text('password_hash').notNull(),
-  role: userRoleEnum('role').notNull().default('student'),
+  role: userRoleEnum('role').notNull().default('cashier'),
   name: text('name').notNull(),
+  phone: text('phone'),
   avatarUrl: text('avatar_url'),
+  isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
   emailIdx: uniqueIndex('users_email_idx').on(t.email),
 }));
 
-// ─── Classes ─────────────────────────────────────────────
-export const classes = pgTable('classes', {
+// ─── Customers ───────────────────────────────────────────
+export const customers = pgTable('customers', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
-  grade: integer('grade').notNull(),
-  teacherId: integer('teacher_id').notNull().references(() => users.id),
-  academicYear: text('academic_year').notNull().default('2024-2025'),
+  email: text('email'),
+  phone: text('phone'),
+  address: text('address'),
+  notes: text('notes'),
+  totalSpent: decimal('total_spent', { precision: 12, scale: 2 }).notNull().default('0'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  nameIdx: index('customers_name_idx').on(t.name),
+}));
+
+// ─── Product Categories ──────────────────────────────────
+export const productCategories = pgTable('product_categories', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-// ─── Students ────────────────────────────────────────────
-export const students = pgTable('students', {
+// ─── Products ────────────────────────────────────────────
+export const products = pgTable('products', {
+  id: serial('id').primaryKey(),
+  categoryId: integer('category_id').references(() => productCategories.id),
+  name: text('name').notNull(),
+  sku: text('sku').notNull(),
+  description: text('description'),
+  price: decimal('price', { precision: 10, scale: 2 }).notNull(),
+  costPrice: decimal('cost_price', { precision: 10, scale: 2 }).notNull().default('0'),
+  unit: text('unit').notNull().default('piece'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  skuIdx: uniqueIndex('products_sku_idx').on(t.sku),
+  categoryIdx: index('products_category_idx').on(t.categoryId),
+}));
+
+// ─── Services ────────────────────────────────────────────
+export const services = pgTable('services', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  pricePerUnit: decimal('price_per_unit', { precision: 10, scale: 2 }).notNull(),
+  unit: text('unit').notNull().default('page'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// ─── Print Jobs ──────────────────────────────────────────
+export const printJobs = pgTable('print_jobs', {
+  id: serial('id').primaryKey(),
+  jobNumber: text('job_number').notNull(),
+  customerId: integer('customer_id').references(() => customers.id),
+  assignedTo: integer('assigned_to').references(() => users.id),
+  status: printJobStatusEnum('status').notNull().default('pending'),
+  title: text('title').notNull(),
+  description: text('description'),
+  serviceId: integer('service_id').references(() => services.id),
+  quantity: integer('quantity').notNull().default(1),
+  unitPrice: decimal('unit_price', { precision: 10, scale: 2 }).notNull().default('0'),
+  totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull().default('0'),
+  notes: text('notes'),
+  dueDate: timestamp('due_date'),
+  completedAt: timestamp('completed_at'),
+  createdBy: integer('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  jobNumberIdx: uniqueIndex('print_jobs_number_idx').on(t.jobNumber),
+  statusIdx: index('print_jobs_status_idx').on(t.status),
+  customerIdx: index('print_jobs_customer_idx').on(t.customerId),
+}));
+
+// ─── Inventory Items ─────────────────────────────────────
+export const inventoryItems = pgTable('inventory_items', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id').notNull().references(() => products.id),
+  quantityInStock: integer('quantity_in_stock').notNull().default(0),
+  reorderLevel: integer('reorder_level').notNull().default(10),
+  location: text('location'),
+  lastRestockedAt: timestamp('last_restocked_at'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  productIdx: uniqueIndex('inventory_product_idx').on(t.productId),
+}));
+
+// ─── Inventory Movements ─────────────────────────────────
+export const inventoryMovements = pgTable('inventory_movements', {
+  id: serial('id').primaryKey(),
+  inventoryItemId: integer('inventory_item_id').notNull().references(() => inventoryItems.id),
+  type: movementTypeEnum('type').notNull(),
+  quantity: integer('quantity').notNull(),
+  reason: text('reason'),
+  referenceId: integer('reference_id'),
+  referenceType: text('reference_type'),
+  createdBy: integer('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  itemIdx: index('inv_movement_item_idx').on(t.inventoryItemId),
+}));
+
+// ─── Suppliers ───────────────────────────────────────────
+export const suppliers = pgTable('suppliers', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  contactName: text('contact_name'),
+  email: text('email'),
+  phone: text('phone'),
+  address: text('address'),
+  notes: text('notes'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// ─── Purchase Orders ─────────────────────────────────────
+export const purchaseOrders = pgTable('purchase_orders', {
+  id: serial('id').primaryKey(),
+  poNumber: text('po_number').notNull(),
+  supplierId: integer('supplier_id').notNull().references(() => suppliers.id),
+  status: poStatusEnum('status').notNull().default('draft'),
+  totalAmount: decimal('total_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  notes: text('notes'),
+  orderedBy: integer('ordered_by').references(() => users.id),
+  orderedAt: timestamp('ordered_at'),
+  receivedAt: timestamp('received_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  poNumberIdx: uniqueIndex('po_number_idx').on(t.poNumber),
+  supplierIdx: index('po_supplier_idx').on(t.supplierId),
+}));
+
+export const purchaseOrderItems = pgTable('purchase_order_items', {
+  id: serial('id').primaryKey(),
+  purchaseOrderId: integer('purchase_order_id').notNull().references(() => purchaseOrders.id, { onDelete: 'cascade' }),
+  productId: integer('product_id').notNull().references(() => products.id),
+  quantity: integer('quantity').notNull(),
+  unitPrice: decimal('unit_price', { precision: 10, scale: 2 }).notNull(),
+  totalPrice: decimal('total_price', { precision: 10, scale: 2 }).notNull(),
+}, (t) => ({
+  poIdx: index('poi_po_idx').on(t.purchaseOrderId),
+}));
+
+// ─── Cash Sessions ───────────────────────────────────────
+export const cashSessions = pgTable('cash_sessions', {
+  id: serial('id').primaryKey(),
+  openedBy: integer('opened_by').notNull().references(() => users.id),
+  closedBy: integer('closed_by').references(() => users.id),
+  openingBalance: decimal('opening_balance', { precision: 10, scale: 2 }).notNull().default('0'),
+  closingBalance: decimal('closing_balance', { precision: 10, scale: 2 }),
+  totalSales: decimal('total_sales', { precision: 10, scale: 2 }).notNull().default('0'),
+  totalExpenses: decimal('total_expenses', { precision: 10, scale: 2 }).notNull().default('0'),
+  status: cashSessionStatusEnum('status').notNull().default('open'),
+  notes: text('notes'),
+  openedAt: timestamp('opened_at').defaultNow().notNull(),
+  closedAt: timestamp('closed_at'),
+}, (t) => ({
+  statusIdx: index('cash_session_status_idx').on(t.status),
+}));
+
+// ─── Sales ───────────────────────────────────────────────
+export const sales = pgTable('sales', {
+  id: serial('id').primaryKey(),
+  saleNumber: text('sale_number').notNull(),
+  customerId: integer('customer_id').references(() => customers.id),
+  cashierId: integer('cashier_id').notNull().references(() => users.id),
+  cashSessionId: integer('cash_session_id').references(() => cashSessions.id),
+  subtotal: decimal('subtotal', { precision: 10, scale: 2 }).notNull(),
+  discountAmount: decimal('discount_amount', { precision: 10, scale: 2 }).notNull().default('0'),
+  taxAmount: decimal('tax_amount', { precision: 10, scale: 2 }).notNull().default('0'),
+  totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
+  paymentMethod: paymentMethodEnum('payment_method').notNull().default('cash'),
+  paymentStatus: text('payment_status').notNull().default('paid'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  saleNumberIdx: uniqueIndex('sales_number_idx').on(t.saleNumber),
+  cashierIdx: index('sales_cashier_idx').on(t.cashierId),
+  sessionIdx: index('sales_session_idx').on(t.cashSessionId),
+  createdIdx: index('sales_created_idx').on(t.createdAt),
+}));
+
+export const saleItems = pgTable('sale_items', {
+  id: serial('id').primaryKey(),
+  saleId: integer('sale_id').notNull().references(() => sales.id, { onDelete: 'cascade' }),
+  productId: integer('product_id').references(() => products.id),
+  serviceId: integer('service_id').references(() => services.id),
+  printJobId: integer('print_job_id').references(() => printJobs.id),
+  description: text('description').notNull(),
+  quantity: integer('quantity').notNull().default(1),
+  unitPrice: decimal('unit_price', { precision: 10, scale: 2 }).notNull(),
+  discount: decimal('discount', { precision: 10, scale: 2 }).notNull().default('0'),
+  totalPrice: decimal('total_price', { precision: 10, scale: 2 }).notNull(),
+}, (t) => ({
+  saleIdx: index('sale_items_sale_idx').on(t.saleId),
+}));
+
+// ─── Expense Categories ──────────────────────────────────
+export const expenseCategories = pgTable('expense_categories', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ─── Expenses ────────────────────────────────────────────
+export const expenses = pgTable('expenses', {
+  id: serial('id').primaryKey(),
+  categoryId: integer('category_id').references(() => expenseCategories.id),
+  cashSessionId: integer('cash_session_id').references(() => cashSessions.id),
+  description: text('description').notNull(),
+  amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
+  paymentMethod: paymentMethodEnum('payment_method').notNull().default('cash'),
+  referenceNumber: text('reference_number'),
+  expenseDate: timestamp('expense_date').defaultNow().notNull(),
+  recordedBy: integer('recorded_by').references(() => users.id),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  dateIdx: index('expenses_date_idx').on(t.expenseDate),
+  categoryIdx: index('expenses_category_idx').on(t.categoryId),
+}));
+
+// ─── Receipts ────────────────────────────────────────────
+export const receipts = pgTable('receipts', {
+  id: serial('id').primaryKey(),
+  saleId: integer('sale_id').notNull().references(() => sales.id),
+  receiptNumber: text('receipt_number').notNull(),
+  generatedBy: integer('generated_by').references(() => users.id),
+  generatedAt: timestamp('generated_at').defaultNow().notNull(),
+}, (t) => ({
+  receiptNumberIdx: uniqueIndex('receipts_number_idx').on(t.receiptNumber),
+  saleIdx: index('receipts_sale_idx').on(t.saleId),
+}));
+
+// ─── Audit Logs ──────────────────────────────────────────
+export const auditLogs = pgTable('audit_logs', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => users.id),
+  action: text('action').notNull(),
+  entityType: text('entity_type').notNull(),
+  entityId: integer('entity_id'),
+  oldValues: text('old_values'),
+  newValues: text('new_values'),
+  ipAddress: text('ip_address'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index('audit_user_idx').on(t.userId),
+  entityIdx: index('audit_entity_idx').on(t.entityType, t.entityId),
+  createdIdx: index('audit_created_idx').on(t.createdAt),
+}));
+
+// ─── Staff Activity ──────────────────────────────────────
+export const staffActivity = pgTable('staff_activity', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),
-  classId: integer('class_id').references(() => classes.id),
-  studentCode: text('student_code').notNull(),
-  grade: integer('grade').notNull(),
-  xp: integer('xp').notNull().default(0),
-  level: integer('level').notNull().default(1),
-  streakDays: integer('streak_days').notNull().default(0),
-  lastActiveAt: timestamp('last_active_at').defaultNow(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => ({
-  codeIdx: uniqueIndex('students_code_idx').on(t.studentCode),
-  classIdx: index('students_class_idx').on(t.classId),
-}));
-
-// ─── Scores ──────────────────────────────────────────────
-export const scores = pgTable('scores', {
-  id: serial('id').primaryKey(),
-  studentId: integer('student_id').notNull().references(() => students.id),
-  subject: subjectEnum('subject').notNull(),
-  score: real('score').notNull(),
-  maxScore: real('max_score').notNull().default(100),
-  assessmentType: text('assessment_type').notNull().default('quiz'),
-  assessmentName: text('assessment_name').notNull(),
-  recordedBy: integer('recorded_by').references(() => users.id),
-  recordedAt: timestamp('recorded_at').defaultNow().notNull(),
-  semester: integer('semester').notNull().default(1),
-  academicYear: text('academic_year').notNull().default('2024-2025'),
-}, (t) => ({
-  studentIdx: index('scores_student_idx').on(t.studentId),
-  subjectIdx: index('scores_subject_idx').on(t.subject),
-}));
-
-// ─── Badges ──────────────────────────────────────────────
-export const badges = pgTable('badges', {
-  id: serial('id').primaryKey(),
-  name: text('name').notNull(),
-  description: text('description').notNull(),
-  icon: text('icon').notNull(),
-  category: badgeCategoryEnum('category').notNull(),
-  xpReward: integer('xp_reward').notNull().default(50),
-  criteria: text('criteria').notNull(),
-  color: text('color').notNull().default('#6366f1'),
-});
-
-export const studentBadges = pgTable('student_badges', {
-  id: serial('id').primaryKey(),
-  studentId: integer('student_id').notNull().references(() => students.id),
-  badgeId: integer('badge_id').notNull().references(() => badges.id),
-  earnedAt: timestamp('earned_at').defaultNow().notNull(),
-}, (t) => ({
-  uniqueBadge: uniqueIndex('student_badge_unique').on(t.studentId, t.badgeId),
-}));
-
-// ─── Rankings ────────────────────────────────────────────
-export const rankings = pgTable('rankings', {
-  id: serial('id').primaryKey(),
-  studentId: integer('student_id').notNull().references(() => students.id),
-  classId: integer('class_id').references(() => classes.id),
-  overallRank: integer('overall_rank').notNull(),
-  classRank: integer('class_rank'),
-  averageScore: real('average_score').notNull(),
-  totalXp: integer('total_xp').notNull().default(0),
-  period: text('period').notNull().default('2024-2025-S1'),
-  calculatedAt: timestamp('calculated_at').defaultNow().notNull(),
-}, (t) => ({
-  studentPeriodIdx: uniqueIndex('rankings_student_period').on(t.studentId, t.period),
-}));
-
-// ─── AI Predictions ──────────────────────────────────────
-export const predictions = pgTable('predictions', {
-  id: serial('id').primaryKey(),
-  studentId: integer('student_id').notNull().references(() => students.id),
-  subject: subjectEnum('subject').notNull(),
-  predictedScore: real('predicted_score').notNull(),
-  confidenceScore: real('confidence_score').notNull(),
-  riskLevel: riskLevelEnum('risk_level').notNull().default('low'),
-  riskFactors: text('risk_factors').array(),
-  recommendations: text('recommendations').array(),
-  generatedAt: timestamp('generated_at').defaultNow().notNull(),
-});
-
-// ─── Parent Links ─────────────────────────────────────────
-export const parentLinks = pgTable('parent_links', {
-  id: serial('id').primaryKey(),
-  parentId: integer('parent_id').notNull().references(() => users.id),
-  studentId: integer('student_id').notNull().references(() => students.id),
-  relationship: text('relationship').notNull().default('parent'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => ({
-  uniqueLink: uniqueIndex('parent_student_unique').on(t.parentId, t.studentId),
-}));
-
-// ─── Activity Logs ───────────────────────────────────────
-export const activityLogs = pgTable('activity_logs', {
-  id: serial('id').primaryKey(),
-  studentId: integer('student_id').notNull().references(() => students.id),
   activityType: text('activity_type').notNull(),
   description: text('description').notNull(),
-  xpEarned: integer('xp_earned').notNull().default(0),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index('staff_activity_user_idx').on(t.userId),
+}));
 
 // ─── Notifications ────────────────────────────────────────
 export const notifications = pgTable('notifications', {
@@ -148,365 +306,85 @@ export const notifications = pgTable('notifications', {
   type: text('type').notNull().default('info'),
   isRead: boolean('is_read').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index('notifications_user_idx').on(t.userId),
+}));
+
+// ─── Settings ────────────────────────────────────────────
+export const settings = pgTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 // ─── Relations ───────────────────────────────────────────
-export const usersRelations = relations(users, ({ one, many }) => ({
-  student: one(students, { fields: [users.id], references: [students.userId] }),
+export const usersRelations = relations(users, ({ many }) => ({
   notifications: many(notifications),
+  staffActivity: many(staffActivity),
+  auditLogs: many(auditLogs),
 }));
 
-export const studentsRelations = relations(students, ({ one, many }) => ({
-  user: one(users, { fields: [students.userId], references: [users.id] }),
-  class: one(classes, { fields: [students.classId], references: [classes.id] }),
-  scores: many(scores),
-  badges: many(studentBadges),
-  rankings: many(rankings),
-  predictions: many(predictions),
-  activityLogs: many(activityLogs),
-  parentLinks: many(parentLinks),
+export const customersRelations = relations(customers, ({ many }) => ({
+  printJobs: many(printJobs),
+  sales: many(sales),
 }));
 
-export const scoresRelations = relations(scores, ({ one }) => ({
-  student: one(students, { fields: [scores.studentId], references: [students.id] }),
+export const productCategoriesRelations = relations(productCategories, ({ many }) => ({
+  products: many(products),
 }));
 
-export const classesRelations = relations(classes, ({ one, many }) => ({
-  teacher: one(users, { fields: [classes.teacherId], references: [users.id] }),
-  students: many(students),
+export const productsRelations = relations(products, ({ one, many }) => ({
+  category: one(productCategories, { fields: [products.categoryId], references: [productCategories.id] }),
+  inventoryItem: one(inventoryItems, { fields: [products.id], references: [inventoryItems.productId] }),
+  saleItems: many(saleItems),
 }));
 
-export const studentBadgesRelations = relations(studentBadges, ({ one }) => ({
-  student: one(students, { fields: [studentBadges.studentId], references: [students.id] }),
-  badge: one(badges, { fields: [studentBadges.badgeId], references: [badges.id] }),
+export const inventoryItemsRelations = relations(inventoryItems, ({ one, many }) => ({
+  product: one(products, { fields: [inventoryItems.productId], references: [products.id] }),
+  movements: many(inventoryMovements),
 }));
 
-// ─── Password Reset Tokens ────────────────────────────────
-export const passwordResetTokens = pgTable('password_reset_tokens', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  token: text('token').notNull(),
-  expiresAt: timestamp('expires_at').notNull(),
-  usedAt: timestamp('used_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => ({
-  tokenIdx: uniqueIndex('prt_token_idx').on(t.token),
+export const printJobsRelations = relations(printJobs, ({ one }) => ({
+  customer: one(customers, { fields: [printJobs.customerId], references: [customers.id] }),
+  assignedUser: one(users, { fields: [printJobs.assignedTo], references: [users.id] }),
+  service: one(services, { fields: [printJobs.serviceId], references: [services.id] }),
 }));
 
-// ─── Class Subjects ───────────────────────────────────────
-export const classSubjects = pgTable('class_subjects', {
-  id: serial('id').primaryKey(),
-  classId: integer('class_id').notNull().references(() => classes.id, { onDelete: 'cascade' }),
-  subject: text('subject').notNull(),
-}, (t) => ({
-  uniqueClassSubject: uniqueIndex('class_subject_unique').on(t.classId, t.subject),
+export const salesRelations = relations(sales, ({ one, many }) => ({
+  customer: one(customers, { fields: [sales.customerId], references: [customers.id] }),
+  cashier: one(users, { fields: [sales.cashierId], references: [users.id] }),
+  cashSession: one(cashSessions, { fields: [sales.cashSessionId], references: [cashSessions.id] }),
+  items: many(saleItems),
+  receipt: one(receipts, { fields: [sales.id], references: [receipts.saleId] }),
 }));
 
-export const classSubjectsRelations = relations(classSubjects, ({ one }) => ({
-  class: one(classes, { fields: [classSubjects.classId], references: [classes.id] }),
+export const saleItemsRelations = relations(saleItems, ({ one }) => ({
+  sale: one(sales, { fields: [saleItems.saleId], references: [sales.id] }),
+  product: one(products, { fields: [saleItems.productId], references: [products.id] }),
+  service: one(services, { fields: [saleItems.serviceId], references: [services.id] }),
 }));
 
-// ─── Assessments ─────────────────────────────────────────────────────────────
-export const assessments = pgTable('assessments', {
-  id: serial('id').primaryKey(),
-  title: text('title').notNull(),
-  description: text('description'),
-  subject: text('subject').notNull(),
-  type: text('type').notNull().default('quiz'),
-  status: text('status').notNull().default('draft'),
-  timeLimitMins: integer('time_limit_mins'),
-  maxAttempts: integer('max_attempts').notNull().default(1),
-  passingScore: real('passing_score').default(50),
-  classId: integer('class_id').references(() => classes.id),
-  createdBy: integer('created_by').notNull().references(() => users.id),
-  instructions: text('instructions'),
-  shuffleQuestions: boolean('shuffle_questions').notNull().default(false),
-  shuffleOptions: boolean('shuffle_options').notNull().default(false),
-  isPublic: boolean('is_public').notNull().default(false),
-  publicToken: text('public_token'),
-  scheduledAt: timestamp('scheduled_at'),
-  closesAt: timestamp('closes_at'),
-  semester: integer('semester').notNull().default(1),
-  academicYear: text('academic_year').notNull().default('2024-2025'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (t) => ({
-  createdByIdx: index('assessments_created_by_idx').on(t.createdBy),
-  classIdx: index('assessments_class_idx').on(t.classId),
-  statusIdx: index('assessments_status_idx').on(t.status),
+export const suppliersRelations = relations(suppliers, ({ many }) => ({
+  purchaseOrders: many(purchaseOrders),
 }));
 
-// ─── Questions ────────────────────────────────────────────────────────────────
-export const questions = pgTable('questions', {
-  id: serial('id').primaryKey(),
-  assessmentId: integer('assessment_id').notNull().references(() => assessments.id, { onDelete: 'cascade' }),
-  type: text('type').notNull().default('mcq'),
-  text: text('text').notNull(),
-  imageUrl: text('image_url'),
-  points: real('points').notNull().default(1),
-  orderIndex: integer('order_index').notNull().default(0),
-  explanation: text('explanation'),
-  correctAnswer: text('correct_answer'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => ({
-  assessmentIdx: index('questions_assessment_idx').on(t.assessmentId),
+export const purchaseOrdersRelations = relations(purchaseOrders, ({ one, many }) => ({
+  supplier: one(suppliers, { fields: [purchaseOrders.supplierId], references: [suppliers.id] }),
+  items: many(purchaseOrderItems),
 }));
 
-// ─── Question Options ─────────────────────────────────────────────────────────
-export const questionOptions = pgTable('question_options', {
-  id: serial('id').primaryKey(),
-  questionId: integer('question_id').notNull().references(() => questions.id, { onDelete: 'cascade' }),
-  text: text('text').notNull(),
-  isCorrect: boolean('is_correct').notNull().default(false),
-  orderIndex: integer('order_index').notNull().default(0),
-}, (t) => ({
-  questionIdx: index('q_options_question_idx').on(t.questionId),
+export const cashSessionsRelations = relations(cashSessions, ({ one, many }) => ({
+  openedByUser: one(users, { fields: [cashSessions.openedBy], references: [users.id] }),
+  sales: many(sales),
+  expenses: many(expenses),
 }));
 
-// ─── Question Bank ────────────────────────────────────────────────────────────
-export const questionBank = pgTable('question_bank', {
-  id: serial('id').primaryKey(),
-  subject: text('subject').notNull(),
-  type: text('type').notNull().default('mcq'),
-  text: text('text').notNull(),
-  options: text('options'),
-  correctAnswer: text('correct_answer'),
-  explanation: text('explanation'),
-  points: real('points').notNull().default(1),
-  tags: text('tags'),
-  createdBy: integer('created_by').notNull().references(() => users.id),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => ({
-  subjectIdx: index('qb_subject_idx').on(t.subject),
+export const expensesRelations = relations(expenses, ({ one }) => ({
+  category: one(expenseCategories, { fields: [expenses.categoryId], references: [expenseCategories.id] }),
+  cashSession: one(cashSessions, { fields: [expenses.cashSessionId], references: [cashSessions.id] }),
+  recordedByUser: one(users, { fields: [expenses.recordedBy], references: [users.id] }),
 }));
 
-// ─── Submissions ──────────────────────────────────────────────────────────────
-export const submissions = pgTable('submissions', {
-  id: serial('id').primaryKey(),
-  assessmentId: integer('assessment_id').notNull().references(() => assessments.id),
-  studentId: integer('student_id').references(() => students.id),
-  participantName: text('participant_name'),
-  isGuest: boolean('is_guest').notNull().default(false),
-  status: text('status').notNull().default('in_progress'),
-  startedAt: timestamp('started_at').defaultNow().notNull(),
-  submittedAt: timestamp('submitted_at'),
-  totalScore: real('total_score'),
-  maxScore: real('max_score'),
-  timeTakenSecs: integer('time_taken_secs'),
-  attemptNumber: integer('attempt_number').notNull().default(1),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => ({
-  assessmentStudentIdx: index('submissions_assessment_student_idx').on(t.assessmentId, t.studentId),
-}));
-
-// ─── Submission Answers ───────────────────────────────────────────────────────
-export const submissionAnswers = pgTable('submission_answers', {
-  id: serial('id').primaryKey(),
-  submissionId: integer('submission_id').notNull().references(() => submissions.id, { onDelete: 'cascade' }),
-  questionId: integer('question_id').notNull().references(() => questions.id),
-  selectedOptionId: integer('selected_option_id').references(() => questionOptions.id),
-  answerText: text('answer_text'),
-  isCorrect: boolean('is_correct'),
-  pointsAwarded: real('points_awarded').default(0),
-  feedback: text('feedback'),
-}, (t) => ({
-  submissionIdx: index('sub_answers_submission_idx').on(t.submissionId),
-}));
-
-// ─── Assessment Relations ─────────────────────────────────────────────────────
-export const assessmentsRelations = relations(assessments, ({ one, many }) => ({
-  creator: one(users, { fields: [assessments.createdBy], references: [users.id] }),
-  class: one(classes, { fields: [assessments.classId], references: [classes.id] }),
-  questions: many(questions),
-  submissions: many(submissions),
-}));
-
-export const questionsRelations = relations(questions, ({ one, many }) => ({
-  assessment: one(assessments, { fields: [questions.assessmentId], references: [assessments.id] }),
-  options: many(questionOptions),
-}));
-
-export const questionOptionsRelations = relations(questionOptions, ({ one }) => ({
-  question: one(questions, { fields: [questionOptions.questionId], references: [questions.id] }),
-}));
-
-export const submissionsRelations = relations(submissions, ({ one, many }) => ({
-  assessment: one(assessments, { fields: [submissions.assessmentId], references: [assessments.id] }),
-  student: one(students, { fields: [submissions.studentId], references: [students.id] }),
-  answers: many(submissionAnswers),
-}));
-
-export const submissionAnswersRelations = relations(submissionAnswers, ({ one }) => ({
-  submission: one(submissions, { fields: [submissionAnswers.submissionId], references: [submissions.id] }),
-  question: one(questions, { fields: [submissionAnswers.questionId], references: [questions.id] }),
-  selectedOption: one(questionOptions, { fields: [submissionAnswers.selectedOptionId], references: [questionOptions.id] }),
-}));
-
-// ─── Topics (LMS) ────────────────────────────────────────
-export const topics = pgTable('topics', {
-  id: serial('id').primaryKey(),
-  subject: text('subject').notNull(),
-  name: text('name').notNull(),
-  description: text('description'),
-  orderIndex: integer('order_index').notNull().default(0),
-  createdBy: integer('created_by').notNull().references(() => users.id),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => ({
-  subjectIdx: index('topics_subject_idx').on(t.subject),
-}));
-
-// ─── Learning Materials (LMS) ────────────────────────────
-export const learningMaterials = pgTable('learning_materials', {
-  id: serial('id').primaryKey(),
-  topicId: integer('topic_id').notNull().references(() => topics.id, { onDelete: 'cascade' }),
-  classId: integer('class_id').references(() => classes.id),
-  createdBy: integer('created_by').notNull().references(() => users.id),
-  title: text('title').notNull(),
-  description: text('description'),
-  type: text('type').notNull().default('note'),
-  url: text('url'),
-  content: text('content'),
-  isPublished: boolean('is_published').notNull().default(false),
-  estimatedMins: integer('estimated_mins').default(10),
-  orderIndex: integer('order_index').notNull().default(0),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (t) => ({
-  topicIdx: index('lm_topic_idx').on(t.topicId),
-  classIdx: index('lm_class_idx').on(t.classId),
-}));
-
-// ─── Lesson Progress (LMS) ───────────────────────────────
-export const lessonProgress = pgTable('lesson_progress', {
-  id: serial('id').primaryKey(),
-  studentId: integer('student_id').notNull().references(() => students.id),
-  materialId: integer('material_id').notNull().references(() => learningMaterials.id, { onDelete: 'cascade' }),
-  completedAt: timestamp('completed_at'),
-  timeSpentMins: integer('time_spent_mins').default(0),
-  isBookmarked: boolean('is_bookmarked').notNull().default(false),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => ({
-  uniqueProgress: uniqueIndex('lesson_progress_unique').on(t.studentId, t.materialId),
-}));
-
-// ─── Announcements ───────────────────────────────────────
-export const announcements = pgTable('announcements', {
-  id: serial('id').primaryKey(),
-  classId: integer('class_id').references(() => classes.id),
-  authorId: integer('author_id').notNull().references(() => users.id),
-  title: text('title').notNull(),
-  body: text('body').notNull(),
-  isPinned: boolean('is_pinned').notNull().default(false),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (t) => ({
-  classIdx: index('announcements_class_idx').on(t.classId),
-}));
-
-// ─── LMS & Announcements Relations ───────────────────────
-export const topicsRelations = relations(topics, ({ one, many }) => ({
-  creator: one(users, { fields: [topics.createdBy], references: [users.id] }),
-  materials: many(learningMaterials),
-}));
-
-export const learningMaterialsRelations = relations(learningMaterials, ({ one, many }) => ({
-  topic: one(topics, { fields: [learningMaterials.topicId], references: [topics.id] }),
-  class: one(classes, { fields: [learningMaterials.classId], references: [classes.id] }),
-  creator: one(users, { fields: [learningMaterials.createdBy], references: [users.id] }),
-  progress: many(lessonProgress),
-}));
-
-export const lessonProgressRelations = relations(lessonProgress, ({ one }) => ({
-  student: one(students, { fields: [lessonProgress.studentId], references: [students.id] }),
-  material: one(learningMaterials, { fields: [lessonProgress.materialId], references: [learningMaterials.id] }),
-}));
-
-export const announcementsRelations = relations(announcements, ({ one }) => ({
-  class: one(classes, { fields: [announcements.classId], references: [classes.id] }),
-  author: one(users, { fields: [announcements.authorId], references: [users.id] }),
-}));
-
-// ─── Subject Assignments ─────────────────────────────────
-export const studentSubjects = pgTable('student_subjects', {
-  id: serial('id').primaryKey(),
-  studentId: integer('student_id').notNull().references(() => students.id, { onDelete: 'cascade' }),
-  subject: text('subject').notNull(),
-  enrolledAt: timestamp('enrolled_at').defaultNow().notNull(),
-}, (t) => ({
-  ssUnique: uniqueIndex('student_subject_unique').on(t.studentId, t.subject),
-  ssStudentIdx: index('ss_student_idx').on(t.studentId),
-}));
-
-export const teacherSubjects = pgTable('teacher_subjects', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  subject: text('subject').notNull(),
-  assignedAt: timestamp('assigned_at').defaultNow().notNull(),
-}, (t) => ({
-  tsUnique: uniqueIndex('teacher_subject_unique').on(t.userId, t.subject),
-  tsUserIdx: index('ts_user_idx').on(t.userId),
-}));
-
-export const studentSubjectsRelations = relations(studentSubjects, ({ one }) => ({
-  student: one(students, { fields: [studentSubjects.studentId], references: [students.id] }),
-}));
-
-export const teacherSubjectsRelations = relations(teacherSubjects, ({ one }) => ({
-  user: one(users, { fields: [teacherSubjects.userId], references: [users.id] }),
-}));
-
-// ─── Mentor Requests ─────────────────────────────────────
-export const mentorRequests = pgTable('mentor_requests', {
-  id: serial('id').primaryKey(),
-  studentId: integer('student_id').notNull().references(() => students.id),
-  subject: text('subject').notNull(),
-  message: text('message'),
-  status: text('status').notNull().default('pending'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (t) => ({
-  mrStudentIdx: index('mr_student_idx').on(t.studentId),
-  mrStatusIdx: index('mr_status_idx').on(t.status),
-}));
-
-export const mentorSessions = pgTable('mentor_sessions', {
-  id: serial('id').primaryKey(),
-  requestId: integer('request_id').notNull().references(() => mentorRequests.id),
-  mentorId: integer('mentor_id').notNull().references(() => users.id),
-  studentId: integer('student_id').notNull().references(() => students.id),
-  scheduledAt: timestamp('scheduled_at'),
-  notes: text('notes'),
-  isCompleted: boolean('is_completed').notNull().default(false),
-  completedAt: timestamp('completed_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
-
-export const mentorRatings = pgTable('mentor_ratings', {
-  id: serial('id').primaryKey(),
-  sessionId: integer('session_id').notNull().references(() => mentorSessions.id),
-  studentId: integer('student_id').notNull().references(() => students.id),
-  mentorId: integer('mentor_id').notNull().references(() => users.id),
-  rating: integer('rating').notNull(),
-  comment: text('comment'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => ({
-  mentorRatingUnique: uniqueIndex('mentor_rating_session_unique').on(t.sessionId),
-}));
-
-export const mentorRequestsRelations = relations(mentorRequests, ({ one, many }) => ({
-  student: one(students, { fields: [mentorRequests.studentId], references: [students.id] }),
-  sessions: many(mentorSessions),
-}));
-
-export const mentorSessionsRelations = relations(mentorSessions, ({ one, many }) => ({
-  request: one(mentorRequests, { fields: [mentorSessions.requestId], references: [mentorRequests.id] }),
-  mentor: one(users, { fields: [mentorSessions.mentorId], references: [users.id] }),
-  student: one(students, { fields: [mentorSessions.studentId], references: [students.id] }),
-  ratings: many(mentorRatings),
-}));
-
-export const mentorRatingsRelations = relations(mentorRatings, ({ one }) => ({
-  session: one(mentorSessions, { fields: [mentorRatings.sessionId], references: [mentorSessions.id] }),
-  student: one(students, { fields: [mentorRatings.studentId], references: [students.id] }),
-  mentor: one(users, { fields: [mentorRatings.mentorId], references: [users.id] }),
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, { fields: [notifications.userId], references: [users.id] }),
 }));

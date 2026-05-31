@@ -1,240 +1,119 @@
 import { useEffect, useState } from 'react';
-import { reportsApi, studentsApi } from '../lib/api';
-import LoadingSpinner from '../components/LoadingSpinner';
-import { FileText, Download, TrendingUp, Award, BarChart3 } from 'lucide-react';
-import clsx from 'clsx';
+import { reportsApi } from '../lib/api';
+import { BarChart3, TrendingUp, ShoppingBag, Printer, RefreshCw } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+const php = (v: number) => `₱${v.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 export default function Reports() {
-  const [classReport, setClassReport] = useState<any[]>([]);
-  const [students, setStudents] = useState<any[]>([]);
-  const [selectedStudent, setSelectedStudent] = useState('');
-  const [studentReport, setStudentReport] = useState<any>(null);
+  const [data, setData] = useState<any>(null);
+  const [jobsData, setJobsData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [loadingStudent, setLoadingStudent] = useState(false);
-  const [sortField, setSortField] = useState<'avgScore' | 'xp' | 'name'>('avgScore');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const today = new Date();
+  const [from, setFrom] = useState(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]);
+  const [to, setTo] = useState(today.toISOString().split('T')[0]);
 
-  useEffect(() => {
-    Promise.all([reportsApi.classPerformance(), studentsApi.list()])
-      .then(([r, s]) => { setClassReport(r); setStudents(s); })
-      .catch(console.error)
+  const load = () => {
+    setLoading(true);
+    Promise.all([reportsApi.salesSummary(from, to), reportsApi.printJobsSummary()])
+      .then(([s, j]) => { setData(s); setJobsData(j); })
       .finally(() => setLoading(false));
-  }, []);
-
-  const loadStudentReport = async (id: string) => {
-    if (!id) return;
-    setSelectedStudent(id);
-    setLoadingStudent(true);
-    try {
-      const r = await reportsApi.studentFull(parseInt(id));
-      setStudentReport(r);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingStudent(false);
-    }
   };
 
-  const sortedReport = [...classReport].sort((a, b) => {
-    const dir = sortDir === 'desc' ? -1 : 1;
-    if (sortField === 'avgScore') return dir * (a.avgScore - b.avgScore);
-    if (sortField === 'xp') return dir * (a.xp - b.xp);
-    return dir * a.name.localeCompare(b.name);
-  });
+  useEffect(() => { load(); }, []);
 
-  if (loading) return <LoadingSpinner text="Generating reports..." />;
+  const chartData = data?.dailySales.map((d: any) => ({
+    date: new Date(d.date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }),
+    sales: parseFloat(d.total),
+    orders: d.count,
+  })) ?? [];
 
   return (
-    <div className="animate-fade-in">
-      <div className="page-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="page-title flex items-center gap-3">
-            <FileText size={28} className="text-primary-600" />
-            Reports
-          </h1>
-          <p className="page-subtitle">Comprehensive academic reports for students and classes.</p>
+          <h1 className="page-title dark:text-white flex items-center gap-2"><BarChart3 size={24} className="text-indigo-600" /> Reports</h1>
+          <p className="page-subtitle dark:text-slate-400">Sales and performance analytics</p>
         </div>
-        <button
-          onClick={() => reportsApi.exportCSV()}
-          className="btn-secondary flex items-center gap-2"
-        >
-          <Download size={16} />
-          Export CSV
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="input text-sm w-36 dark:bg-slate-800 dark:border-slate-600 dark:text-white" />
+          <span className="text-slate-400 dark:text-slate-500 text-sm">to</span>
+          <input type="date" value={to} onChange={e => setTo(e.target.value)} className="input text-sm w-36 dark:bg-slate-800 dark:border-slate-600 dark:text-white" />
+          <button onClick={load} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2"><RefreshCw size={14} /> Apply</button>
+        </div>
       </div>
 
-      {/* Class Performance Table */}
-      <div className="card mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-          <h3 className="section-title mb-0">Class Performance Overview</h3>
-          <div className="flex gap-2">
-            {(['avgScore', 'xp', 'name'] as const).map(f => (
-              <button
-                key={f}
-                onClick={() => { setSortField(f); setSortDir(d => d === 'desc' ? 'asc' : 'desc'); }}
-                className={clsx('text-xs px-3 py-1.5 rounded-lg font-medium transition-colors',
-                  sortField === f ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}
-              >
-                {f === 'avgScore' ? 'Score' : f === 'xp' ? 'XP' : 'Name'}
-                {sortField === f && (sortDir === 'desc' ? ' ↓' : ' ↑')}
-              </button>
+      {loading ? (
+        <div className="flex items-center justify-center h-48"><div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" /></div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            {[
+              { label: 'Total Sales', value: php(data?.summary.totalSales ?? 0), icon: <ShoppingBag size={18} />, color: 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' },
+              { label: 'Total Orders', value: String(data?.summary.totalOrders ?? 0), icon: <BarChart3 size={18} />, color: 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' },
+              { label: 'Avg. Order', value: php(data?.summary.avgOrder ?? 0), icon: <TrendingUp size={18} />, color: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' },
+              { label: 'Total Expenses', value: php(data?.summary.totalExpenses ?? 0), icon: <BarChart3 size={18} />, color: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400' },
+              { label: 'Net Revenue', value: php(data?.summary.netRevenue ?? 0), icon: <TrendingUp size={18} />, color: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' },
+            ].map(s => (
+              <div key={s.label} className="card dark:bg-slate-800 dark:border-slate-700/50">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${s.color}`}>{s.icon}</div>
+                <div className="text-xl font-bold text-slate-900 dark:text-white">{s.value}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{s.label}</div>
+              </div>
             ))}
           </div>
-        </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-100">
-                <th className="table-header text-left py-3 px-3">Rank</th>
-                <th className="table-header text-left py-3 px-3">Student</th>
-                <th className="table-header text-right py-3 px-3">Avg Score</th>
-                <th className="table-header text-right py-3 px-3">XP</th>
-                <th className="table-header text-right py-3 px-3">Level</th>
-                <th className="table-header text-right py-3 px-3">Badges</th>
-                <th className="table-header text-right py-3 px-3">Assessments</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedReport.map((s: any, i: number) => (
-                <tr
-                  key={s.studentId}
-                  className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors"
-                  onClick={() => loadStudentReport(String(s.studentId))}
-                >
-                  <td className="py-3 px-3">
-                    <span className={clsx('text-sm font-bold', i < 3 ? 'text-amber-600' : 'text-slate-400')}>#{i + 1}</span>
-                  </td>
-                  <td className="py-3 px-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 grad-primary rounded-full flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
-                        {s.name?.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold text-slate-900">{s.name}</div>
-                        <div className="text-xs text-slate-400">{s.studentCode} • Grade {s.grade}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-3 px-3 text-right">
-                    <span className={clsx('text-sm font-bold', s.avgScore >= 80 ? 'text-emerald-600' : s.avgScore >= 60 ? 'text-amber-600' : 'text-red-500')}>
-                      {s.avgScore}%
-                    </span>
-                  </td>
-                  <td className="py-3 px-3 text-right text-sm font-semibold text-primary-600">{s.xp?.toLocaleString()}</td>
-                  <td className="py-3 px-3 text-right text-sm text-slate-600">Lv.{s.level}</td>
-                  <td className="py-3 px-3 text-right text-sm text-slate-600">{s.badgeCount}</td>
-                  <td className="py-3 px-3 text-right text-sm text-slate-600">{s.totalAssessments}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Individual Student Report */}
-      <div className="card">
-        <h3 className="section-title">Individual Student Report</h3>
-        <div className="mb-6">
-          <select
-            value={selectedStudent}
-            onChange={e => loadStudentReport(e.target.value)}
-            className="input max-w-md"
-          >
-            <option value="">Click a student above or select here...</option>
-            {students.map(s => <option key={s.id} value={s.id}>{s.name} ({s.studentCode})</option>)}
-          </select>
-        </div>
-
-        {loadingStudent && <LoadingSpinner text="Loading student report..." />}
-
-        {studentReport && !loadingStudent && (
-          <div className="animate-fade-in">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 rounded-2xl mb-6">
-              <div className="w-14 h-14 grad-primary rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-md">
-                {studentReport.student?.name?.charAt(0)}
-              </div>
-              <div className="flex-1">
-                <div className="font-bold text-slate-900 text-lg">{studentReport.student?.name}</div>
-                <div className="text-sm text-slate-500">{studentReport.student?.studentCode} • Grade {studentReport.student?.grade}</div>
-              </div>
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <div className="text-xl font-black text-primary-600">{studentReport.student?.xp?.toLocaleString()}</div>
-                  <div className="text-xs text-slate-500">XP</div>
-                </div>
-                <div>
-                  <div className="text-xl font-black text-purple-600">Lv.{studentReport.student?.level}</div>
-                  <div className="text-xs text-slate-500">Level</div>
-                </div>
-                <div>
-                  <div className="text-xl font-black text-amber-600">#{studentReport.ranking?.overallRank ?? 'N/A'}</div>
-                  <div className="text-xs text-slate-500">Rank</div>
-                </div>
-              </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+              <h2 className="section-title dark:text-white mb-4">Daily Sales</h2>
+              {chartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={chartData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip formatter={(v: number) => php(v)} />
+                    <Bar dataKey="sales" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <div className="flex items-center justify-center h-48 text-slate-400 dark:text-slate-500 text-sm">No data for selected period</div>}
             </div>
 
-            {/* Subject Summary */}
-            <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <BarChart3 size={16} className="text-primary-600" />
-              Subject Summary
-            </h4>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-              {studentReport.subjectSummary.map((s: any) => (
-                <div key={s.subject} className="p-3 bg-slate-50 rounded-xl">
-                  <div className="text-xs font-semibold text-slate-500 uppercase capitalize mb-1">{s.subject}</div>
-                  <div className={clsx('text-xl font-black', s.avgScore >= 80 ? 'text-emerald-600' : s.avgScore >= 60 ? 'text-amber-600' : 'text-red-500')}>
-                    {s.avgScore}%
+            <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+              <h2 className="section-title dark:text-white mb-4">Top Products / Services</h2>
+              <div className="space-y-3 max-h-60 overflow-y-auto">
+                {(data?.topProducts ?? []).length === 0 ? (
+                  <div className="text-center py-8 text-slate-400 dark:text-slate-500 text-sm">No data for selected period</div>
+                ) : data?.topProducts.map((p: any, i: number) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-slate-900 dark:text-white truncate">{p.description}</div>
+                      <div className="text-xs text-slate-400 dark:text-slate-500">Qty: {p.totalQuantity}</div>
+                    </div>
+                    <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{php(parseFloat(p.totalRevenue))}</span>
                   </div>
-                  <div className="text-xs text-slate-400">{s.count} assessments</div>
-                  <div className="text-xs text-slate-400">
-                    H: {Math.round(s.highest)}% / L: {Math.round(s.lowest)}%
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-
-            {/* Badges */}
-            {studentReport.badges.length > 0 && (
-              <>
-                <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                  <Award size={16} className="text-primary-600" />
-                  Earned Badges
-                </h4>
-                <div className="flex flex-wrap gap-2 mb-6">
-                  {studentReport.badges.map(({ badge }: any) => (
-                    <div key={badge.id} className="flex items-center gap-2 px-3 py-2 rounded-xl border" style={{ borderColor: `${badge.color}40`, background: `${badge.color}10` }}>
-                      <span className="text-lg">{badge.icon}</span>
-                      <span className="text-xs font-semibold text-slate-700">{badge.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* Monthly Progress */}
-            {studentReport.monthlyProgress.length > 0 && (
-              <>
-                <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                  <TrendingUp size={16} className="text-primary-600" />
-                  Monthly Progress
-                </h4>
-                <div className="flex gap-2 overflow-x-auto pb-2">
-                  {studentReport.monthlyProgress.map((m: any) => (
-                    <div key={m.month} className="flex-shrink-0 text-center p-3 bg-slate-50 rounded-xl min-w-[80px]">
-                      <div className={clsx('text-lg font-black', m.avgScore >= 80 ? 'text-emerald-600' : m.avgScore >= 60 ? 'text-amber-600' : 'text-red-500')}>
-                        {m.avgScore}%
-                      </div>
-                      <div className="text-xs text-slate-500">{m.month.split(' ')[0]}</div>
-                      <div className="text-xs text-slate-400">{m.assessments} tests</div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
           </div>
-        )}
-      </div>
+
+          {jobsData && (
+            <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+              <h2 className="section-title dark:text-white mb-4 flex items-center gap-2"><Printer size={18} className="text-indigo-600" /> Print Jobs Summary</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {(jobsData.byStatus ?? []).map((s: any) => (
+                  <div key={s.status} className="text-center p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
+                    <div className="text-2xl font-bold text-slate-900 dark:text-white">{s.count}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 capitalize mt-0.5">{s.status.replace('_', ' ')}</div>
+                    <div className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mt-1">{s.total ? php(parseFloat(s.total)) : '₱0.00'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

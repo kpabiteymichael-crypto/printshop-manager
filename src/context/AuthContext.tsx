@@ -1,11 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { authApi } from '../lib/api';
 
-interface User {
+export type UserRole = 'owner' | 'manager' | 'cashier' | 'print_operator' | 'inventory_officer';
+
+export interface User {
   id: number;
   name: string;
   email: string;
-  role: 'admin' | 'teacher' | 'student' | 'parent';
+  role: UserRole;
+  phone?: string;
   avatarUrl?: string;
 }
 
@@ -23,16 +26,16 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('edu_token'));
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('ps_token'));
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem('edu_token');
+    const storedToken = localStorage.getItem('ps_token');
     if (storedToken) {
       authApi.me()
         .then(data => setUser(data.user))
         .catch(() => {
-          localStorage.removeItem('edu_token');
+          localStorage.removeItem('ps_token');
           setToken(null);
         })
         .finally(() => setLoading(false));
@@ -43,13 +46,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const data = await authApi.login(email, password);
-    localStorage.setItem('edu_token', data.token);
+    localStorage.setItem('ps_token', data.token);
     setToken(data.token);
     setUser(data.user);
   };
 
   const logout = () => {
-    localStorage.removeItem('edu_token');
+    localStorage.removeItem('ps_token');
     setToken(null);
     setUser(null);
   };
@@ -57,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateUser = (u: Partial<User>, newToken?: string) => {
     setUser(prev => prev ? { ...prev, ...u } : prev);
     if (newToken) {
-      localStorage.setItem('edu_token', newToken);
+      localStorage.setItem('ps_token', newToken);
       setToken(newToken);
     }
   };

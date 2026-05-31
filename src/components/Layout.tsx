@@ -1,88 +1,91 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useClass } from '../context/ClassContext';
+import { useTheme } from '../context/ThemeContext';
+import { useOnline } from '../hooks/useOnline';
 import { useState, useEffect } from 'react';
 import { notificationsApi, authApi } from '../lib/api';
 import {
-  LayoutDashboard, Users, BarChart3, Trophy, Brain,
-  FileText, LogOut, Bell, GraduationCap, Star, Menu, X,
-  ClipboardList, Users2, ChevronRight, Settings, ChevronDown,
-  UserCog, Eye, EyeOff, CheckCircle, AlertCircle, BookOpen, Database,
-  Library, MapPin, Megaphone,
+  LayoutDashboard, ShoppingCart, Printer, Package, BookOpen,
+  Users, Truck, Wallet, Receipt, BarChart3, UserCog, Settings,
+  Bell, LogOut, Menu, X, Sun, Moon, Wifi, WifiOff,
+  ChevronRight, ChevronLeft, AlertCircle, CheckCircle, Eye, EyeOff,
 } from 'lucide-react';
 import clsx from 'clsx';
 
-interface NavItem { label: string; to: string; icon: React.ReactNode; roles: string[] }
+interface NavItem {
+  label: string;
+  to: string;
+  icon: React.ReactNode;
+  roles: string[];
+}
 
 const navItems: NavItem[] = [
-  { label: 'Dashboard', to: '/dashboard', icon: <LayoutDashboard size={18} />, roles: ['student'] },
-  { label: 'Overview', to: '/admin', icon: <LayoutDashboard size={18} />, roles: ['admin', 'teacher'] },
-  { label: 'Students', to: '/students', icon: <Users size={18} />, roles: ['admin', 'teacher'] },
-  { label: 'Score Entry', to: '/scores/entry', icon: <ClipboardList size={18} />, roles: ['admin', 'teacher'] },
-  { label: 'Assessments', to: '/assessments', icon: <BookOpen size={18} />, roles: ['admin', 'teacher', 'student'] },
-  { label: 'My Subjects', to: '/subjects', icon: <Library size={18} />, roles: ['student'] },
-  { label: 'Study Plan', to: '/study-plan', icon: <MapPin size={18} />, roles: ['student'] },
-  { label: 'Mentor Requests', to: '/mentor-requests', icon: <Users size={18} />, roles: ['student', 'teacher', 'admin'] },
-  { label: 'Subject Management', to: '/subject-management', icon: <Library size={18} />, roles: ['admin'] },
-  { label: 'Question Bank', to: '/question-bank', icon: <Database size={18} />, roles: ['admin', 'teacher'] },
-  { label: 'Content Manager', to: '/content', icon: <Library size={18} />, roles: ['admin', 'teacher'] },
-  { label: 'Analytics', to: '/analytics', icon: <BarChart3 size={18} />, roles: ['admin', 'teacher'] },
-  { label: 'AI Predictions', to: '/predictions', icon: <Brain size={18} />, roles: ['admin', 'teacher'] },
-  { label: 'Reports', to: '/reports', icon: <FileText size={18} />, roles: ['admin', 'teacher'] },
-  { label: 'Announcements', to: '/announcements', icon: <Megaphone size={18} />, roles: ['admin', 'teacher', 'student', 'parent'] },
-  { label: 'Leaderboard', to: '/leaderboard', icon: <Trophy size={18} />, roles: ['admin', 'teacher', 'student'] },
-  { label: 'Badges', to: '/badges', icon: <Star size={18} />, roles: ['admin', 'teacher', 'student'] },
-  { label: 'Parent Portal', to: '/parent-portal', icon: <Users2 size={18} />, roles: ['parent', 'admin'] },
-  { label: 'Teams', to: '/teams', icon: <Users size={18} />, roles: ['admin', 'teacher'] },
-  { label: 'Settings', to: '/settings', icon: <Settings size={18} />, roles: ['admin', 'teacher'] },
+  { label: 'Dashboard',   to: '/dashboard',  icon: <LayoutDashboard size={18} />, roles: ['owner', 'manager'] },
+  { label: 'POS',         to: '/pos',        icon: <ShoppingCart size={18} />,    roles: ['owner', 'manager', 'cashier'] },
+  { label: 'Print Jobs',  to: '/print-jobs', icon: <Printer size={18} />,         roles: ['owner', 'manager', 'print_operator', 'cashier'] },
+  { label: 'Inventory',   to: '/inventory',  icon: <Package size={18} />,         roles: ['owner', 'manager', 'inventory_officer'] },
+  { label: 'Bookstore',   to: '/bookstore',  icon: <BookOpen size={18} />,        roles: ['owner', 'manager', 'inventory_officer', 'cashier'] },
+  { label: 'Customers',   to: '/customers',  icon: <Users size={18} />,           roles: ['owner', 'manager', 'cashier'] },
+  { label: 'Suppliers',   to: '/suppliers',  icon: <Truck size={18} />,           roles: ['owner', 'manager', 'inventory_officer'] },
+  { label: 'Cash',        to: '/cash',       icon: <Wallet size={18} />,          roles: ['owner', 'manager', 'cashier'] },
+  { label: 'Expenses',    to: '/expenses',   icon: <Receipt size={18} />,         roles: ['owner', 'manager', 'cashier'] },
+  { label: 'Reports',     to: '/reports',    icon: <BarChart3 size={18} />,       roles: ['owner', 'manager'] },
+  { label: 'Staff',       to: '/staff',      icon: <UserCog size={18} />,         roles: ['owner'] },
+  { label: 'Settings',    to: '/settings',   icon: <Settings size={18} />,        roles: ['owner', 'manager'] },
 ];
 
-// Bottom navigation items per role (most important 4-5 for thumb reach)
-const bottomNavItems: Record<string, { label: string; to: string; icon: React.ReactNode }[]> = {
-  student: [
-    { label: 'Dashboard',  to: '/dashboard',       icon: <LayoutDashboard size={20} /> },
-    { label: 'Subjects',   to: '/subjects',        icon: <Library size={20} /> },
-    { label: 'Quizzes',    to: '/assessments',     icon: <BookOpen size={20} /> },
-    { label: 'Mentor',     to: '/mentor-requests', icon: <Users size={20} /> },
-  ],
-  teacher: [
-    { label: 'Overview',  to: '/admin',           icon: <LayoutDashboard size={20} /> },
-    { label: 'Students',  to: '/students',        icon: <Users size={20} /> },
-    { label: 'Content',   to: '/content',         icon: <Library size={20} /> },
-    { label: 'Mentoring', to: '/mentor-requests', icon: <Users size={20} /> },
-    { label: 'Analytics', to: '/analytics',       icon: <BarChart3 size={20} /> },
-  ],
-  admin: [
-    { label: 'Overview',  to: '/admin',           icon: <LayoutDashboard size={20} /> },
-    { label: 'Students',  to: '/students',        icon: <Users size={20} /> },
-    { label: 'Content',   to: '/content',         icon: <Library size={20} /> },
-    { label: 'Mentoring', to: '/mentor-requests', icon: <Users size={20} /> },
-    { label: 'Analytics', to: '/analytics',       icon: <BarChart3 size={20} /> },
-  ],
-  parent: [
-    { label: 'Portal',     to: '/parent-portal', icon: <Users2 size={20} /> },
-    { label: 'Leaderboard',to: '/leaderboard',   icon: <Trophy size={20} /> },
-    { label: 'Badges',     to: '/badges',        icon: <Star size={20} /> },
-  ],
+const ROLE_LABELS: Record<string, string> = {
+  owner: 'Owner',
+  manager: 'Manager',
+  cashier: 'Cashier',
+  print_operator: 'Print Operator',
+  inventory_officer: 'Inv. Officer',
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  owner: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
+  manager: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  cashier: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  print_operator: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
+  inventory_officer: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
 };
 
 export default function Layout() {
   const { user, logout, updateUser } = useAuth();
-  const { activeClass, classes: teacherClasses, setActiveClassId } = useClass();
+  const { toggleTheme, isDark } = useTheme();
+  const isOnline = useOnline();
   const navigate = useNavigate();
-  const location = useLocation();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifs, setShowNotifs] = useState(false);
-  const [showClassPicker, setShowClassPicker] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({ name: '', email: '', currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [profileForm, setProfileForm] = useState({ name: '', email: '', phone: '', currentPassword: '', newPassword: '', confirmPassword: '' });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileToast, setProfileToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [showPw, setShowPw] = useState(false);
+  const [offlineBanner, setOfflineBanner] = useState(false);
+
+  useEffect(() => {
+    notificationsApi.list().then(setNotifications).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!isOnline) {
+      setOfflineBanner(true);
+    } else {
+      const t = setTimeout(() => setOfflineBanner(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [isOnline]);
+
+  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const userNav = navItems.filter(n => user && n.roles.includes(user.role));
+
+  const handleLogout = () => { logout(); navigate('/login'); };
 
   const openProfile = () => {
-    setProfileForm({ name: user?.name ?? '', email: user?.email ?? '', currentPassword: '', newPassword: '', confirmPassword: '' });
+    setProfileForm({ name: user?.name ?? '', email: user?.email ?? '', phone: user?.phone ?? '', currentPassword: '', newPassword: '', confirmPassword: '' });
     setProfileToast(null);
     setShowProfile(true);
   };
@@ -99,6 +102,7 @@ export default function Layout() {
       const payload: any = {};
       if (profileForm.name.trim() !== user?.name) payload.name = profileForm.name.trim();
       if (profileForm.email.trim() !== user?.email) payload.email = profileForm.email.trim();
+      if (profileForm.phone.trim() !== (user?.phone ?? '')) payload.phone = profileForm.phone.trim();
       if (profileForm.newPassword) {
         payload.currentPassword = profileForm.currentPassword;
         payload.newPassword = profileForm.newPassword;
@@ -114,212 +118,187 @@ export default function Layout() {
       setProfileToast({ type: 'success', message: 'Profile updated successfully' });
       setProfileForm(p => ({ ...p, currentPassword: '', newPassword: '', confirmPassword: '' }));
     } catch (err: any) {
-      setProfileToast({ type: 'error', message: err.response?.data?.error ?? 'Failed to update profile' });
+      setProfileToast({ type: 'error', message: err.message ?? 'Failed to update profile' });
     } finally {
       setProfileSaving(false);
     }
   };
 
-  useEffect(() => {
-    notificationsApi.list().then(setNotifications).catch(() => {});
-  }, []);
-
-  const unreadCount = notifications.filter(n => !n.isRead).length;
-  const userNav = navItems.filter(n => user && n.roles.includes(user.role));
-  const mobileNav = user ? (bottomNavItems[user.role] ?? []) : [];
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
-
-  const Sidebar = ({ mobile = false }) => (
-    <div className={clsx(
-      'flex flex-col h-full',
-      mobile ? 'w-72' : 'w-64'
-    )}>
+  const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => (
+    <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="px-6 py-5 border-b border-slate-100">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 grad-primary rounded-xl flex items-center justify-center shadow-md shadow-primary-200">
-            <GraduationCap size={20} className="text-white" />
-          </div>
+      <div className={clsx('flex items-center border-b border-slate-100 dark:border-slate-700/50', collapsed && !mobile ? 'px-3 py-4 justify-center' : 'px-4 py-4 gap-3')}>
+        <div className="w-9 h-9 bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-md shadow-indigo-200 dark:shadow-indigo-900/40 flex-shrink-0">
+          <Printer size={18} className="text-white" />
+        </div>
+        {(!collapsed || mobile) && (
           <div>
-            <div className="font-bold text-slate-900 text-sm">EduAnalytics</div>
-            <div className="text-xs text-slate-500">Learning Dashboard</div>
+            <div className="font-bold text-slate-900 dark:text-white text-sm leading-tight">PrintShop</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">Manager</div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* User info */}
-      <div className="px-4 py-4 border-b border-slate-100">
-        <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
-          <div className="w-9 h-9 grad-primary rounded-full flex items-center justify-center text-white font-bold text-sm shadow-sm">
-            {user?.name?.charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-slate-900 truncate">{user?.name}</div>
-            <div className="text-xs text-slate-500 capitalize">{user?.role}</div>
+      {/* User badge */}
+      {(!collapsed || mobile) && (
+        <div className="px-3 py-3 border-b border-slate-100 dark:border-slate-700/50">
+          <div className="flex items-center gap-2.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl px-3 py-2.5">
+            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+              {user?.name?.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">{user?.name}</div>
+              <span className={clsx('inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-semibold mt-0.5', user?.role ? ROLE_COLORS[user.role] : '')}>
+                {user?.role ? ROLE_LABELS[user.role] : ''}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-3 mb-3">Navigation</div>
-        {userNav.filter(item => item.to !== '/settings').map(item => (
+      {/* Nav */}
+      <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
+        {userNav.map(item => (
           <NavLink
             key={item.to}
             to={item.to}
-            onClick={() => setSidebarOpen(false)}
+            onClick={() => setMobileOpen(false)}
+            title={collapsed && !mobile ? item.label : undefined}
             className={({ isActive }) => clsx(
-              'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group',
+              'flex items-center rounded-xl text-sm font-medium transition-all duration-150 group relative',
+              collapsed && !mobile ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5',
               isActive
-                ? 'bg-primary-600 text-white shadow-md shadow-primary-200'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-indigo-900/40'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 hover:text-slate-900 dark:hover:text-white'
             )}
           >
-            {item.icon}
-            <span>{item.label}</span>
-            <ChevronRight size={14} className="ml-auto opacity-0 group-hover:opacity-50 transition-opacity" />
+            <span className="flex-shrink-0">{item.icon}</span>
+            {(!collapsed || mobile) && <span>{item.label}</span>}
+            {(!collapsed || mobile) && (
+              <ChevronRight size={13} className="ml-auto opacity-0 group-hover:opacity-40 transition-opacity" />
+            )}
           </NavLink>
         ))}
-
-        {/* Settings at the bottom of nav, separated */}
-        {userNav.find(item => item.to === '/settings') && (
-          <>
-            <div className="border-t border-slate-100 my-3" />
-            <NavLink
-              to="/settings"
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) => clsx(
-                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group',
-                isActive
-                  ? 'bg-primary-600 text-white shadow-md shadow-primary-200'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              )}
-            >
-              <Settings size={18} />
-              <span>Settings</span>
-              <ChevronRight size={14} className="ml-auto opacity-0 group-hover:opacity-50 transition-opacity" />
-            </NavLink>
-          </>
-        )}
       </nav>
 
       {/* Logout */}
-      <div className="px-3 py-4 border-t border-slate-100">
+      <div className="px-2 py-3 border-t border-slate-100 dark:border-slate-700/50">
         <button
           onClick={handleLogout}
-          className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all duration-150"
+          title={collapsed && !mobile ? 'Sign Out' : undefined}
+          className={clsx(
+            'flex items-center w-full rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-all',
+            collapsed && !mobile ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5'
+          )}
         >
           <LogOut size={18} />
-          <span>Sign Out</span>
+          {(!collapsed || mobile) && <span>Sign Out</span>}
         </button>
       </div>
     </div>
   );
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="flex h-screen bg-slate-50 dark:bg-slate-900 overflow-hidden transition-colors duration-200">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-100 shadow-sm flex-shrink-0">
-        <Sidebar />
+      <aside className={clsx(
+        'hidden lg:flex flex-col bg-white dark:bg-slate-850 border-r border-slate-100 dark:border-slate-700/50 shadow-sm flex-shrink-0 transition-all duration-200',
+        collapsed ? 'w-16' : 'w-60'
+      )} style={{ backgroundColor: isDark ? '#1a2035' : undefined }}>
+        <SidebarContent />
+        {/* Collapse toggle */}
+        <button
+          onClick={() => setCollapsed(c => !c)}
+          className="absolute left-full top-20 -translate-x-1/2 w-5 h-5 rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 shadow-sm flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors z-10"
+          style={{ marginLeft: collapsed ? '2rem' : '15rem' }}
+        >
+          {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+        </button>
       </aside>
 
-      {/* Mobile Sidebar Overlay */}
-      {sidebarOpen && (
+      {/* Mobile overlay */}
+      {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
-          <div className="absolute left-0 top-0 bottom-0 bg-white shadow-2xl animate-slide-in">
-            <div className="flex justify-end p-4">
-              <button onClick={() => setSidebarOpen(false)} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100">
-                <X size={20} />
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+          <div className="absolute left-0 top-0 bottom-0 w-64 bg-white dark:border-r dark:border-slate-700/50 shadow-2xl animate-slide-in" style={{ backgroundColor: isDark ? '#1a2035' : undefined }}>
+            <div className="flex justify-end px-3 pt-3">
+              <button onClick={() => setMobileOpen(false)} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">
+                <X size={18} />
               </button>
             </div>
-            <Sidebar mobile />
+            <SidebarContent mobile />
           </div>
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Bar */}
-        <header className="bg-white border-b border-slate-100 px-4 lg:px-6 py-4 flex items-center gap-4 shadow-sm">
+      {/* Main content */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Offline banner */}
+        {(offlineBanner || !isOnline) && (
+          <div className={clsx(
+            'flex items-center justify-center gap-2 py-1.5 text-xs font-semibold transition-all',
+            !isOnline
+              ? 'bg-red-500 text-white'
+              : 'bg-emerald-500 text-white'
+          )}>
+            {!isOnline ? (
+              <><WifiOff size={13} /> You are offline — some features may not work</>
+            ) : (
+              <><Wifi size={13} /> Back online</>
+            )}
+          </div>
+        )}
+
+        {/* Top bar */}
+        <header className="bg-white dark:bg-slate-850 border-b border-slate-100 dark:border-slate-700/50 px-4 py-3 flex items-center gap-3 shadow-sm flex-shrink-0 z-10" style={{ backgroundColor: isDark ? '#1a2035' : undefined }}>
           <button
-            onClick={() => setSidebarOpen(true)}
-            className="lg:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
+            onClick={() => setMobileOpen(true)}
+            className="lg:hidden p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <Menu size={20} />
           </button>
 
+          {/* Page title area */}
           <div className="flex-1" />
 
-          {/* Teacher class selector */}
-          {user?.role === 'teacher' && teacherClasses.length > 0 && (
-            <div className="relative">
-              <button
-                onClick={() => setShowClassPicker(p => !p)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 transition-all shadow-sm"
-              >
-                <GraduationCap size={15} className="text-primary-600" />
-                <span className="hidden sm:inline max-w-32 truncate">{activeClass?.name ?? 'Select Class'}</span>
-                <ChevronDown size={13} className="text-slate-400" />
-              </button>
-              {showClassPicker && (
-                <div className="absolute right-0 top-10 z-50 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 min-w-48 animate-fade-in">
-                  <div className="px-3 pb-2 pt-1 text-xs font-bold text-slate-400 uppercase tracking-wider">Your Classes</div>
-                  {teacherClasses.map(c => (
-                    <button
-                      key={c.id}
-                      onClick={() => { setActiveClassId(c.id); setShowClassPicker(false); }}
-                      className={clsx(
-                        'w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left hover:bg-slate-50 transition-colors',
-                        activeClass?.id === c.id ? 'text-primary-700 font-semibold bg-primary-50' : 'text-slate-700'
-                      )}
-                    >
-                      <div className="w-6 h-6 grad-primary rounded-lg flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
-                        {c.name?.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="font-semibold">{c.name}</div>
-                        <div className="text-xs text-slate-400">Grade {c.grade} · {c.studentCount} students</div>
-                      </div>
-                      {activeClass?.id === c.id && <span className="ml-auto text-primary-500 text-xs">✓</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Online indicator */}
+          <div className={clsx('hidden sm:flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full', isOnline ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400')}>
+            <div className={clsx('w-1.5 h-1.5 rounded-full', isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500')} />
+            {isOnline ? 'Online' : 'Offline'}
+          </div>
+
+          {/* Dark mode toggle */}
+          <button
+            onClick={toggleTheme}
+            className="p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {isDark ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
 
           {/* Notifications */}
           <div className="relative">
             <button
-              onClick={() => setShowNotifs(!showNotifs)}
-              className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 transition-colors"
+              onClick={() => { setShowNotifs(v => !v); setShowProfile(false); }}
+              className="relative p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
             >
-              <Bell size={20} />
+              <Bell size={18} />
               {unreadCount > 0 && (
-                <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 rounded-full text-white text-xs flex items-center justify-center font-bold">
-                  {unreadCount}
+                <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 rounded-full text-white text-xs flex items-center justify-center font-bold leading-none">
+                  {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
             </button>
 
             {showNotifs && (
-              <div className="absolute right-0 top-12 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 z-50 overflow-hidden animate-fade-in">
-                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                  <span className="font-semibold text-slate-900">Notifications</span>
+              <div className="absolute right-0 top-11 w-80 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-700 z-50 overflow-hidden animate-fade-in">
+                <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                  <span className="font-semibold text-slate-900 dark:text-white text-sm">Notifications</span>
                   {unreadCount > 0 && (
-                    <button
-                      onClick={() => {
-                        notificationsApi.markAllRead();
-                        setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-                        setShowNotifs(false);
-                      }}
-                      className="text-xs text-primary-600 hover:text-primary-700 font-medium"
-                    >
+                    <button onClick={() => {
+                      notificationsApi.markAllRead();
+                      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+                    }} className="text-xs text-indigo-600 dark:text-indigo-400 font-medium hover:underline">
                       Mark all read
                     </button>
                   )}
@@ -330,14 +309,11 @@ export default function Layout() {
                   ) : notifications.map(n => (
                     <div
                       key={n.id}
-                      className={clsx('px-4 py-3 border-b border-slate-50 last:border-0', !n.isRead && 'bg-primary-50')}
-                      onClick={() => {
-                        notificationsApi.markRead(n.id);
-                        setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, isRead: true } : x));
-                      }}
+                      onClick={() => { notificationsApi.markRead(n.id); setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, isRead: true } : x)); }}
+                      className={clsx('px-4 py-3 border-b border-slate-50 dark:border-slate-700/50 last:border-0 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors', !n.isRead && 'bg-indigo-50/60 dark:bg-indigo-900/10')}
                     >
-                      <div className="text-sm font-semibold text-slate-900">{n.title}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">{n.message}</div>
+                      <div className="text-sm font-semibold text-slate-900 dark:text-white">{n.title}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{n.message}</div>
                     </div>
                   ))}
                 </div>
@@ -345,143 +321,115 @@ export default function Layout() {
             )}
           </div>
 
-          {/* User avatar + profile + logout */}
-          <div className="flex items-center gap-2">
-            <button onClick={openProfile} className="flex items-center gap-2 hover:opacity-80 transition-opacity" title="Edit profile">
-              <div className="w-8 h-8 grad-primary rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                {user?.name?.charAt(0).toUpperCase()}
-              </div>
-              <div className="hidden sm:block text-left">
-                <div className="text-sm font-semibold text-slate-900 leading-none">{user?.name}</div>
-                <div className="text-xs text-slate-400 mt-0.5 capitalize">{user?.role}</div>
-              </div>
-            </button>
-            <button
-              onClick={handleLogout}
-              className="ml-1 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:bg-red-50 hover:text-red-600 border border-slate-200 hover:border-red-200 transition-all"
-              title="Sign out"
-            >
-              <LogOut size={13} />
-              <span className="hidden sm:inline">Sign Out</span>
-            </button>
-          </div>
-
-          {/* Profile Modal */}
-          {showProfile && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowProfile(false)} />
-              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md animate-fade-in">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 grad-primary rounded-xl flex items-center justify-center shadow-md">
-                      <UserCog size={18} className="text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-slate-900">Edit Profile</h3>
-                      <p className="text-xs text-slate-400 capitalize">{user?.role} account</p>
-                    </div>
-                  </div>
-                  <button onClick={() => setShowProfile(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100">
-                    <X size={18} />
-                  </button>
-                </div>
-                <form onSubmit={handleProfileSave} className="p-6 space-y-4">
-                  {profileToast && (
-                    <div className={`flex items-center gap-2 p-3 rounded-xl text-sm font-medium ${profileToast.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                      {profileToast.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-                      {profileToast.message}
-                    </div>
-                  )}
-                  <div>
-                    <label className="label">Display Name</label>
-                    <input type="text" value={profileForm.name} onChange={e => setProfileForm(p => ({ ...p, name: e.target.value }))}
-                      className="input" required minLength={2} />
-                  </div>
-                  <div>
-                    <label className="label">Email Address</label>
-                    <input type="email" value={profileForm.email} onChange={e => setProfileForm(p => ({ ...p, email: e.target.value }))}
-                      className="input" required />
-                  </div>
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Change Password</p>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="label">Current Password <span className="text-slate-400 font-normal">(required to change email or password)</span></label>
-                        <div className="relative">
-                          <input type={showPw ? 'text' : 'password'} value={profileForm.currentPassword}
-                            onChange={e => setProfileForm(p => ({ ...p, currentPassword: e.target.value }))}
-                            className="input pr-10" placeholder="Enter current password" autoComplete="current-password" />
-                          <button type="button" onClick={() => setShowPw(v => !v)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                            {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="label">New Password</label>
-                        <input type={showPw ? 'text' : 'password'} value={profileForm.newPassword}
-                          onChange={e => setProfileForm(p => ({ ...p, newPassword: e.target.value }))}
-                          className="input" placeholder="Leave blank to keep current" minLength={6} autoComplete="new-password" />
-                      </div>
-                      {profileForm.newPassword && (
-                        <div>
-                          <label className="label">Confirm New Password</label>
-                          <input type={showPw ? 'text' : 'password'} value={profileForm.confirmPassword}
-                            onChange={e => setProfileForm(p => ({ ...p, confirmPassword: e.target.value }))}
-                            className="input" placeholder="Repeat new password" autoComplete="new-password" />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex gap-3 pt-2">
-                    <button type="button" onClick={() => setShowProfile(false)} className="flex-1 btn-secondary">Cancel</button>
-                    <button type="submit" disabled={profileSaving} className="flex-1 btn-primary">
-                      {profileSaving ? 'Saving...' : 'Save Changes'}
-                    </button>
-                  </div>
-                </form>
-              </div>
+          {/* User avatar */}
+          <button
+            onClick={() => { openProfile(); setShowNotifs(false); }}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity ml-1"
+          >
+            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+              {user?.name?.charAt(0).toUpperCase()}
             </div>
-          )}
+            <div className="hidden sm:block text-left">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white leading-tight">{user?.name}</div>
+              <div className="text-xs text-slate-400 dark:text-slate-500">{user?.role ? ROLE_LABELS[user.role] : ''}</div>
+            </div>
+          </button>
         </header>
 
-        {/* Page Content — extra bottom padding on mobile for the bottom nav */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-8 mobile-main-padding lg:pb-8">
+        {/* Profile modal */}
+        {showProfile && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowProfile(false)} />
+            <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-slate-100 dark:border-slate-700">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-700">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Edit Profile</h3>
+                <button onClick={() => setShowProfile(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
+                  <X size={18} />
+                </button>
+              </div>
+              <form onSubmit={handleProfileSave} className="p-6 space-y-4">
+                {profileToast && (
+                  <div className={clsx('flex items-center gap-2 p-3 rounded-xl text-sm font-medium', profileToast.type === 'success' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800')}>
+                    {profileToast.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+                    {profileToast.message}
+                  </div>
+                )}
+                <div>
+                  <label className="label dark:text-slate-300">Display Name</label>
+                  <input type="text" value={profileForm.name} onChange={e => setProfileForm(p => ({ ...p, name: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" required minLength={2} />
+                </div>
+                <div>
+                  <label className="label dark:text-slate-300">Email</label>
+                  <input type="email" value={profileForm.email} onChange={e => setProfileForm(p => ({ ...p, email: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" required />
+                </div>
+                <div>
+                  <label className="label dark:text-slate-300">Phone</label>
+                  <input type="tel" value={profileForm.phone} onChange={e => setProfileForm(p => ({ ...p, phone: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="+63 9XX XXX XXXX" />
+                </div>
+                <div className="border-t border-slate-100 dark:border-slate-700 pt-4 space-y-3">
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Change Password</p>
+                  <div>
+                    <label className="label dark:text-slate-300">Current Password</label>
+                    <div className="relative">
+                      <input type={showPw ? 'text' : 'password'} value={profileForm.currentPassword} onChange={e => setProfileForm(p => ({ ...p, currentPassword: e.target.value }))} className="input pr-10 dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="Required to change email or password" autoComplete="current-password" />
+                      <button type="button" onClick={() => setShowPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                        {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label dark:text-slate-300">New Password</label>
+                    <input type={showPw ? 'text' : 'password'} value={profileForm.newPassword} onChange={e => setProfileForm(p => ({ ...p, newPassword: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="Leave blank to keep current" minLength={6} autoComplete="new-password" />
+                  </div>
+                  {profileForm.newPassword && (
+                    <div>
+                      <label className="label dark:text-slate-300">Confirm New Password</label>
+                      <input type={showPw ? 'text' : 'password'} value={profileForm.confirmPassword} onChange={e => setProfileForm(p => ({ ...p, confirmPassword: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="Repeat new password" autoComplete="new-password" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={() => setShowProfile(false)} className="flex-1 btn-secondary dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">Cancel</button>
+                  <button type="submit" disabled={profileSaving} className="flex-1 btn-primary">
+                    {profileSaving ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Page content */}
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6 pb-20 lg:pb-6">
           <Outlet />
         </main>
-      </div>
 
-      {/* ── Mobile Bottom Navigation ─────────────────────────────────────── */}
-      {mobileNav.length > 0 && (
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-100 shadow-2xl bottom-nav-safe">
-          <div className={`grid h-16`} style={{ gridTemplateColumns: `repeat(${mobileNav.length}, 1fr)` }}>
-            {mobileNav.map(item => {
-              const isActive = location.pathname === item.to ||
-                (item.to !== '/' && location.pathname.startsWith(item.to));
-              return (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className="flex flex-col items-center justify-center gap-0.5 py-2 transition-all duration-150 relative"
-                >
-                  <span className={clsx(
-                    'flex items-center justify-center w-8 h-8 rounded-xl transition-all duration-150',
-                    isActive ? 'bg-primary-600 text-white shadow-md shadow-primary-200' : 'text-slate-400'
-                  )}>
-                    {item.icon}
-                  </span>
-                  <span className={clsx(
-                    'text-[10px] font-semibold leading-none',
-                    isActive ? 'text-primary-600' : 'text-slate-400'
-                  )}>
-                    {item.label}
-                  </span>
-                </NavLink>
-              );
-            })}
-          </div>
+        {/* Mobile bottom nav */}
+        <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-white dark:bg-slate-850 border-t border-slate-100 dark:border-slate-700/50 flex items-center justify-around px-2 py-2 z-40 bottom-nav-safe" style={{ backgroundColor: isDark ? '#1a2035' : undefined }}>
+          {userNav.slice(0, 5).map(item => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) => clsx(
+                'flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all min-w-0 flex-1',
+                isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400'
+              )}
+            >
+              {item.icon}
+              <span className="text-[10px] font-medium truncate">{item.label}</span>
+            </NavLink>
+          ))}
+          {userNav.length > 5 && (
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl text-slate-500 dark:text-slate-400 flex-1"
+            >
+              <Menu size={18} />
+              <span className="text-[10px] font-medium">More</span>
+            </button>
+          )}
         </nav>
-      )}
+      </div>
     </div>
   );
 }

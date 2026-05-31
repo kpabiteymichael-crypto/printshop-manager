@@ -1,50 +1,28 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { ClassProvider } from './context/ClassContext';
+import { ThemeProvider } from './context/ThemeContext';
 import Layout from './components/Layout';
-import LoadingSpinner from './components/LoadingSpinner';
 
-// ── Eagerly loaded (on the critical path) ────────────────────────────────────
 import Login from './pages/Login';
-import Register from './pages/Register';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
 
-// ── Lazily loaded (code-split per route) ─────────────────────────────────────
-const StudentDashboard = lazy(() => import('./pages/StudentDashboard'));
-const AdminDashboard   = lazy(() => import('./pages/AdminDashboard'));
-const Leaderboard      = lazy(() => import('./pages/Leaderboard'));
-const Analytics        = lazy(() => import('./pages/Analytics'));
-const Students         = lazy(() => import('./pages/Students'));
-const ScoreEntry       = lazy(() => import('./pages/ScoreEntry'));
-const Reports          = lazy(() => import('./pages/Reports'));
-const Predictions      = lazy(() => import('./pages/Predictions'));
-const ParentPortal     = lazy(() => import('./pages/ParentPortal'));
-const StudentDetail    = lazy(() => import('./pages/StudentDetail'));
-const Badges           = lazy(() => import('./pages/Badges'));
-const Settings         = lazy(() => import('./pages/Settings'));
-const Teams            = lazy(() => import('./pages/Teams'));
-const Assessments       = lazy(() => import('./pages/Assessments'));
-const AssessmentBuilder = lazy(() => import('./pages/AssessmentBuilder'));
-const TakeAssessment    = lazy(() => import('./pages/TakeAssessment'));
-const AssessmentResults = lazy(() => import('./pages/AssessmentResults'));
-const PublicAssessment  = lazy(() => import('./pages/PublicAssessment'));
-const QuestionBank      = lazy(() => import('./pages/QuestionBank'));
-const LearningHub       = lazy(() => import('./pages/LearningHub'));
-const ContentManager    = lazy(() => import('./pages/ContentManager'));
-const Announcements     = lazy(() => import('./pages/Announcements'));
-const StudyPlan         = lazy(() => import('./pages/StudyPlan'));
-const SubjectHub        = lazy(() => import('./pages/SubjectHub'));
-const SubjectDetail     = lazy(() => import('./pages/SubjectDetail'));
-const MentorRequests    = lazy(() => import('./pages/MentorRequests'));
-const SubjectManagement = lazy(() => import('./pages/SubjectManagement'));
+const Dashboard     = lazy(() => import('./pages/Dashboard'));
+const POS           = lazy(() => import('./pages/POS'));
+const PrintJobs     = lazy(() => import('./pages/PrintJobs'));
+const Inventory     = lazy(() => import('./pages/Inventory'));
+const Bookstore     = lazy(() => import('./pages/Bookstore'));
+const Customers     = lazy(() => import('./pages/Customers'));
+const Suppliers     = lazy(() => import('./pages/Suppliers'));
+const Cash          = lazy(() => import('./pages/Cash'));
+const Expenses      = lazy(() => import('./pages/Expenses'));
+const Reports       = lazy(() => import('./pages/Reports'));
+const Staff         = lazy(() => import('./pages/Staff'));
+const Settings      = lazy(() => import('./pages/Settings'));
 
-// ── Shared page-level loading fallback ───────────────────────────────────────
 function PageLoader() {
   return (
     <div className="flex-1 flex items-center justify-center min-h-96">
-      <LoadingSpinner />
+      <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 }
@@ -52,10 +30,10 @@ function PageLoader() {
 function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
   const { user, loading } = useAuth();
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
       <div className="text-center">
-        <div className="w-12 h-12 border-4 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-slate-500 font-medium">Loading EduAnalytics...</p>
+        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-slate-500 dark:text-slate-400 font-medium">Loading PrintShop Manager...</p>
       </div>
     </div>
   );
@@ -67,179 +45,102 @@ function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?
 function HomeRedirect() {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role === 'student') return <Navigate to="/dashboard" replace />;
-  if (user.role === 'parent') return <Navigate to="/parent-portal" replace />;
-  return <Navigate to="/admin" replace />;
+  if (user.role === 'cashier') return <Navigate to="/pos" replace />;
+  if (user.role === 'print_operator') return <Navigate to="/print-jobs" replace />;
+  if (user.role === 'inventory_officer') return <Navigate to="/inventory" replace />;
+  return <Navigate to="/dashboard" replace />;
 }
 
 export default function App() {
   return (
-    <AuthProvider>
-      <ClassProvider>
+    <ThemeProvider>
+      <AuthProvider>
         <BrowserRouter>
           <Suspense fallback={<PageLoader />}>
             <Routes>
-              <Route path="/login"           element={<Login />} />
-              <Route path="/register"       element={<Register />} />
-              <Route path="/forgot-password" element={<ForgotPassword />} />
-              <Route path="/reset-password"  element={<ResetPassword />} />
+              <Route path="/login" element={<Login />} />
 
               <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
                 <Route index element={<HomeRedirect />} />
 
                 <Route path="dashboard" element={
-                  <ProtectedRoute roles={['student']}>
-                    <Suspense fallback={<PageLoader />}><StudentDashboard /></Suspense>
+                  <ProtectedRoute roles={['owner', 'manager']}>
+                    <Suspense fallback={<PageLoader />}><Dashboard /></Suspense>
                   </ProtectedRoute>
                 } />
 
-                <Route path="admin" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><AdminDashboard /></Suspense>
+                <Route path="pos" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><POS /></Suspense>
                   </ProtectedRoute>
                 } />
 
-                <Route path="students" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><Students /></Suspense>
+                <Route path="print-jobs" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'print_operator', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><PrintJobs /></Suspense>
                   </ProtectedRoute>
                 } />
 
-                <Route path="students/:id" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><StudentDetail /></Suspense>
+                <Route path="inventory" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']}>
+                    <Suspense fallback={<PageLoader />}><Inventory /></Suspense>
                   </ProtectedRoute>
                 } />
 
-                <Route path="scores/entry" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><ScoreEntry /></Suspense>
+                <Route path="bookstore" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><Bookstore /></Suspense>
                   </ProtectedRoute>
                 } />
 
-                <Route path="analytics" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><Analytics /></Suspense>
+                <Route path="customers" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><Customers /></Suspense>
                   </ProtectedRoute>
                 } />
 
-                <Route path="predictions" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><Predictions /></Suspense>
+                <Route path="suppliers" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']}>
+                    <Suspense fallback={<PageLoader />}><Suppliers /></Suspense>
+                  </ProtectedRoute>
+                } />
+
+                <Route path="cash" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><Cash /></Suspense>
+                  </ProtectedRoute>
+                } />
+
+                <Route path="expenses" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><Expenses /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="reports" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
+                  <ProtectedRoute roles={['owner', 'manager']}>
                     <Suspense fallback={<PageLoader />}><Reports /></Suspense>
                   </ProtectedRoute>
                 } />
 
+                <Route path="staff" element={
+                  <ProtectedRoute roles={['owner']}>
+                    <Suspense fallback={<PageLoader />}><Staff /></Suspense>
+                  </ProtectedRoute>
+                } />
+
                 <Route path="settings" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
+                  <ProtectedRoute roles={['owner', 'manager']}>
                     <Suspense fallback={<PageLoader />}><Settings /></Suspense>
                   </ProtectedRoute>
                 } />
-
-                <Route path="teams" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><Teams /></Suspense>
-                  </ProtectedRoute>
-                } />
-
-                <Route path="assessments" element={
-                  <ProtectedRoute roles={['admin', 'teacher', 'student']}>
-                    <Suspense fallback={<PageLoader />}><Assessments /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="assessments/new" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><AssessmentBuilder /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="assessments/:id/edit" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><AssessmentBuilder /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="assessments/:id/take" element={
-                  <ProtectedRoute roles={['student']}>
-                    <Suspense fallback={<PageLoader />}><TakeAssessment /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="assessments/:id/results" element={
-                  <ProtectedRoute roles={['admin', 'teacher', 'student']}>
-                    <Suspense fallback={<PageLoader />}><AssessmentResults /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="question-bank" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><QuestionBank /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="subjects" element={
-                  <ProtectedRoute roles={['student']}>
-                    <Suspense fallback={<PageLoader />}><SubjectHub /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="subjects/:subject" element={
-                  <ProtectedRoute roles={['student']}>
-                    <Suspense fallback={<PageLoader />}><SubjectDetail /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="mentor-requests" element={
-                  <Suspense fallback={<PageLoader />}><MentorRequests /></Suspense>
-                } />
-                <Route path="subject-management" element={
-                  <ProtectedRoute roles={['admin']}>
-                    <Suspense fallback={<PageLoader />}><SubjectManagement /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="learning" element={
-                  <ProtectedRoute roles={['student']}>
-                    <Suspense fallback={<PageLoader />}><LearningHub /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="study-plan" element={
-                  <ProtectedRoute roles={['student']}>
-                    <Suspense fallback={<PageLoader />}><StudyPlan /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="content" element={
-                  <ProtectedRoute roles={['admin', 'teacher']}>
-                    <Suspense fallback={<PageLoader />}><ContentManager /></Suspense>
-                  </ProtectedRoute>
-                } />
-                <Route path="announcements" element={
-                  <Suspense fallback={<PageLoader />}><Announcements /></Suspense>
-                } />
-
-                <Route path="leaderboard" element={
-                  <Suspense fallback={<PageLoader />}><Leaderboard /></Suspense>
-                } />
-
-                <Route path="badges" element={
-                  <Suspense fallback={<PageLoader />}><Badges /></Suspense>
-                } />
-
-                <Route path="parent-portal" element={
-                  <ProtectedRoute roles={['parent', 'admin']}>
-                    <Suspense fallback={<PageLoader />}><ParentPortal /></Suspense>
-                  </ProtectedRoute>
-                } />
               </Route>
-
-              <Route path="public/assessment/:token" element={
-                <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-50"><LoadingSpinner /></div>}>
-                  <PublicAssessment />
-                </Suspense>
-              } />
 
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
         </BrowserRouter>
-      </ClassProvider>
-    </AuthProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

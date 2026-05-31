@@ -1,55 +1,40 @@
 {
-  "name": "EduAnalytics Platform",
-  "short_name": "EduAnalytics",
-  "description": "Student Performance Analytics & Gamified Learning Dashboard",
+  "name": "PrintShop Manager",
+  "short_name": "PrintShop",
+  "description": "Printing Press, Bookstore & Stationery Shop Management System",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
+  "background_color": "#1a2035",
   "theme_color": "#4f46e5",
-  "orientation": "portrait-primary",
-  "scope": "/",
-  "lang": "en",
-  "categories": ["education", "productivity"],
+  "orientation": "any",
   "icons": [
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     },
     {
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icons/icon-maskable-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "/icons/icon-maskable-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     }
   ],
-  "screenshots": [],
+  "categories": ["business", "productivity"],
   "shortcuts": [
     {
-      "name": "Dashboard",
-      "short_name": "Dashboard",
-      "description": "Go to your dashboard",
-      "url": "/",
+      "name": "POS",
+      "short_name": "POS",
+      "description": "Point of Sale",
+      "url": "/pos",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "name": "Leaderboard",
-      "short_name": "Leaderboard",
-      "description": "View the leaderboard",
-      "url": "/leaderboard",
+      "name": "Print Jobs",
+      "short_name": "Jobs",
+      "description": "Manage print jobs",
+      "url": "/print-jobs",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
