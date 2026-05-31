@@ -233,6 +233,54 @@ router.get('/:type', async (req, res) => {
       `);
       rows = (result as any).rows ?? [];
       columns = ['Job #', 'Title', 'Status', 'Customer', 'Operator', 'Quantity', 'Amount', 'Payment', 'Created', 'Completed'];
+    } else if (type === 'profit-analysis') {
+      title = 'Profit Analysis';
+      const result = await db.execute(sql`
+        SELECT
+          p.sku,
+          p.name,
+          COALESCE(pc.name, 'Uncategorised') AS category,
+          p.cost_price::numeric                                                     AS cost_price,
+          p.price::numeric                                                           AS selling_price,
+          (p.price::numeric - p.cost_price::numeric)                                AS margin_per_unit,
+          CASE WHEN p.price::numeric > 0
+            THEN ROUND(((p.price::numeric - p.cost_price::numeric) / p.price::numeric) * 100, 1)
+            ELSE 0 END                                                              AS margin_pct,
+          COALESCE(SUM(si.quantity), 0)                                             AS units_sold,
+          COALESCE(SUM(si.total_price), 0)                                          AS revenue,
+          COALESCE(SUM(si.quantity) * p.cost_price::numeric, 0)                     AS cogs,
+          COALESCE(SUM(si.total_price), 0)
+            - COALESCE(SUM(si.quantity) * p.cost_price::numeric, 0)                AS gross_profit,
+          COALESCE(ii.quantity_in_stock, 0)                                         AS current_stock,
+          COALESCE(ii.quantity_in_stock, 0) * p.cost_price::numeric                AS restock_cost,
+          (COALESCE(SUM(si.total_price), 0)
+            - COALESCE(SUM(si.quantity) * p.cost_price::numeric, 0))
+            - (COALESCE(ii.quantity_in_stock, 0) * p.cost_price::numeric)          AS net_profit
+        FROM products p
+        LEFT JOIN product_categories pc ON pc.id = p.category_id
+        LEFT JOIN inventory_items ii ON ii.product_id = p.id
+        LEFT JOIN sale_items si
+          ON  si.product_id = p.id
+          AND si.is_refunded = false
+        LEFT JOIN sales s
+          ON  s.id = si.sale_id
+          AND s.created_at >= ${fromDate}
+          AND s.created_at <= ${toDate}
+        WHERE p.is_active = true
+        GROUP BY p.id, p.sku, p.name, pc.name, p.cost_price, p.price, ii.quantity_in_stock
+        ORDER BY gross_profit DESC
+      `);
+      rows = (result as any).rows ?? [];
+      const summary = {
+        totalRevenue:     rows.reduce((s: number, r: any) => s + Number(r.revenue), 0),
+        totalCogs:        rows.reduce((s: number, r: any) => s + Number(r.cogs), 0),
+        totalGrossProfit: rows.reduce((s: number, r: any) => s + Number(r.gross_profit), 0),
+        totalRestockCost: rows.reduce((s: number, r: any) => s + Number(r.restock_cost), 0),
+        totalNetProfit:   rows.reduce((s: number, r: any) => s + Number(r.net_profit), 0),
+        productCount:     rows.length,
+      };
+      columns = ['SKU', 'Name', 'Category', 'Cost Price', 'Selling Price', 'Margin/Unit', 'Margin %', 'Units Sold', 'Revenue', 'COGS', 'Gross Profit', 'Stock on Hand', 'Restock Cost', 'Net Profit'];
+      return res.json({ title, columns, rows, summary, from: fromDate.toISOString(), to: toDate.toISOString() });
     } else {
       return res.status(404).json({ error: 'Unknown report type' });
     }
@@ -352,6 +400,38 @@ router.get('/:type/export', async (req, res) => {
         LEFT JOIN users u ON u.id = pj.assigned_to
         WHERE pj.created_at >= ${fromDate} AND pj.created_at <= ${toDate}
         ORDER BY pj.created_at DESC
+      `);
+      rows = (result as any).rows ?? [];
+    } else if (type === 'profit-analysis') {
+      const result = await db.execute(sql`
+        SELECT
+          p.sku                                                                      AS "SKU",
+          p.name                                                                     AS "Name",
+          COALESCE(pc.name, 'Uncategorised')                                        AS "Category",
+          p.cost_price::numeric                                                      AS "Cost Price",
+          p.price::numeric                                                           AS "Selling Price",
+          (p.price::numeric - p.cost_price::numeric)                                AS "Margin/Unit",
+          CASE WHEN p.price::numeric > 0
+            THEN ROUND(((p.price::numeric - p.cost_price::numeric) / p.price::numeric) * 100, 1)
+            ELSE 0 END                                                              AS "Margin %",
+          COALESCE(SUM(si.quantity), 0)                                             AS "Units Sold",
+          COALESCE(SUM(si.total_price), 0)                                          AS "Revenue",
+          COALESCE(SUM(si.quantity) * p.cost_price::numeric, 0)                     AS "COGS",
+          COALESCE(SUM(si.total_price), 0)
+            - COALESCE(SUM(si.quantity) * p.cost_price::numeric, 0)                AS "Gross Profit",
+          COALESCE(ii.quantity_in_stock, 0)                                         AS "Stock on Hand",
+          COALESCE(ii.quantity_in_stock, 0) * p.cost_price::numeric                AS "Restock Cost",
+          (COALESCE(SUM(si.total_price), 0)
+            - COALESCE(SUM(si.quantity) * p.cost_price::numeric, 0))
+            - (COALESCE(ii.quantity_in_stock, 0) * p.cost_price::numeric)          AS "Net Profit"
+        FROM products p
+        LEFT JOIN product_categories pc ON pc.id = p.category_id
+        LEFT JOIN inventory_items ii ON ii.product_id = p.id
+        LEFT JOIN sale_items si ON si.product_id = p.id AND si.is_refunded = false
+        LEFT JOIN sales s ON s.id = si.sale_id AND s.created_at >= ${fromDate} AND s.created_at <= ${toDate}
+        WHERE p.is_active = true
+        GROUP BY p.id, p.sku, p.name, pc.name, p.cost_price, p.price, ii.quantity_in_stock
+        ORDER BY "Gross Profit" DESC
       `);
       rows = (result as any).rows ?? [];
     }
