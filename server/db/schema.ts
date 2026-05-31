@@ -224,6 +224,7 @@ export const sales = pgTable('sales', {
   totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
   paymentMethod: paymentMethodEnum('payment_method').notNull().default('cash'),
   paymentReference: text('payment_reference'),
+  paymentLines: text('payment_lines'),
   paymentStatus: text('payment_status').notNull().default('paid'),
   notes: text('notes'),
   isRefunded: boolean('is_refunded').notNull().default(false),

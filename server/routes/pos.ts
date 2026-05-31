@@ -107,6 +107,13 @@ const saleItemSchema = z.object({
   totalPrice: z.string(),
 });
 
+const paymentLineSchema = z.object({
+  method: z.enum(['cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer']),
+  amount: z.number().positive(),
+  reference: z.string().optional(),
+  amountTendered: z.number().optional(),
+});
+
 router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthRequest, res) => {
   try {
     const data = z.object({
@@ -119,6 +126,7 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
       totalAmount: z.string(),
       paymentMethod: z.enum(['cash', 'mtn_momo', 'telecel_cash', 'airteltigo', 'bank_transfer']).default('cash'),
       paymentReference: z.string().optional(),
+      paymentLines: z.array(paymentLineSchema).optional(),
       isCredit: z.boolean().optional(),
       creditDueDate: z.string().optional(),
       notes: z.string().optional(),
@@ -126,6 +134,15 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
 
     if (data.isCredit && !data.customerId) {
       return res.status(400).json({ error: 'Credit sales require a customer to be selected.' });
+    }
+
+    // Validate paymentLines sum when provided
+    if (data.paymentLines && data.paymentLines.length > 0) {
+      const linesTotal = data.paymentLines.reduce((s, l) => s + l.amount, 0);
+      const saleTotal = parseFloat(data.totalAmount);
+      if (Math.abs(linesTotal - saleTotal) > 0.01) {
+        return res.status(400).json({ error: `Payment lines total (${linesTotal.toFixed(2)}) does not match sale total (${saleTotal.toFixed(2)}).` });
+      }
     }
 
     // Validate stock for product items (outside transaction — reads only)
@@ -156,6 +173,15 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
         : '0001';
       const saleNumber = `SL-${new Date().getFullYear()}-${nextNum}`;
 
+      // Determine primary payment method (largest line, or the single method provided)
+      let primaryMethod = data.paymentMethod;
+      let primaryReference = data.paymentReference;
+      if (data.paymentLines && data.paymentLines.length > 0) {
+        const largest = data.paymentLines.reduce((a, b) => b.amount > a.amount ? b : a);
+        primaryMethod = largest.method;
+        primaryReference = largest.reference;
+      }
+
       const [sale] = await tx.insert(sales).values({
         saleNumber,
         customerId: data.customerId,
@@ -165,8 +191,9 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
         discountAmount: data.discountAmount,
         taxAmount: data.taxAmount,
         totalAmount: data.totalAmount,
-        paymentMethod: data.paymentMethod,
-        paymentReference: data.paymentReference,
+        paymentMethod: primaryMethod,
+        paymentReference: primaryReference,
+        paymentLines: data.paymentLines ? JSON.stringify(data.paymentLines) : null,
         paymentStatus: data.isCredit ? 'credit' : 'paid',
         notes: data.notes,
       }).returning();
@@ -262,6 +289,8 @@ router.get('/receipt/:receiptNumber', async (req, res) => {
       taxAmount: sales.taxAmount,
       totalAmount: sales.totalAmount,
       paymentMethod: sales.paymentMethod,
+      paymentReference: sales.paymentReference,
+      paymentLines: sales.paymentLines,
       paymentStatus: sales.paymentStatus,
       isRefunded: (sales as any).isRefunded,
       createdAt: sales.createdAt,

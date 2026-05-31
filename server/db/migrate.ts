@@ -362,6 +362,9 @@ export async function runMigrations() {
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sales' AND column_name='is_refunded') THEN
         ALTER TABLE sales ADD COLUMN is_refunded BOOLEAN NOT NULL DEFAULT false;
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sales' AND column_name='payment_lines') THEN
+        ALTER TABLE sales ADD COLUMN payment_lines TEXT;
+      END IF;
     END $$;
   `);
 

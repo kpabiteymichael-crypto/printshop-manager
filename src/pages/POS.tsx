@@ -72,6 +72,21 @@ const ALL_MODAL_METHODS: { value: ModalPaymentMethod; label: string; color: stri
   { value: 'credit',       label: 'Pay Later (Credit)',  color: 'bg-orange-500'  },
 ];
 
+interface PaymentLineInput {
+  id: number;
+  method: PaymentMethod;
+  amount: string;
+  reference: string;
+  amountTendered: string;
+}
+
+interface ConfirmedPaymentLine {
+  method: PaymentMethod;
+  amount: number;
+  reference?: string;
+  amountTendered?: number;
+}
+
 const CURRENCY = 'GH₵';
 
 const fmt = (n: number) =>
@@ -92,6 +107,7 @@ function ReceiptOverlay({
     paymentMethod: PaymentMethod | 'credit';
     paymentReference?: string;
     amountTendered?: number;
+    paymentLines?: ConfirmedPaymentLine[];
     items: CartItem[];
     subtotal: number;
     discountAmount: number;
@@ -102,10 +118,26 @@ function ReceiptOverlay({
   shopAddress: string;
   onClose: () => void;
 }) {
+  const isSplit = (data.paymentLines?.length ?? 0) > 1;
   const methodLabel = data.paymentMethod === 'credit'
     ? 'Pay Later (Credit)'
     : PAYMENT_METHODS.find(m => m.value === data.paymentMethod)?.label ?? data.paymentMethod;
-  const change = data.amountTendered ? Math.max(0, data.amountTendered - data.total) : 0;
+
+  // For single cash payment, calculate change
+  const singleCashChange = (!isSplit && data.paymentMethod === 'cash' && data.amountTendered)
+    ? Math.max(0, data.amountTendered - data.total)
+    : 0;
+
+  // For split payments, calculate change from cash line(s)
+  const splitCashChange = isSplit
+    ? (data.paymentLines ?? []).reduce((sum, l) => {
+        if (l.method === 'cash' && l.amountTendered && l.amountTendered > l.amount) {
+          return sum + (l.amountTendered - l.amount);
+        }
+        return sum;
+      }, 0)
+    : 0;
+
   const receiptUrl = `${window.location.origin}/receipt/${data.receiptNumber}`;
 
   return (
@@ -199,28 +231,70 @@ function ReceiptOverlay({
               </div>
             </div>
 
-            {/* Payment */}
+            {/* Payment section */}
             <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-              <div className="flex justify-between">
-                <span>Payment</span>
-                <span className="font-medium text-slate-900 dark:text-white">{methodLabel}</span>
-              </div>
-              {data.paymentReference && (
-                <div className="flex justify-between">
-                  <span>Reference</span>
-                  <span className="font-mono">{data.paymentReference}</span>
-                </div>
-              )}
-              {data.amountTendered && data.paymentMethod === 'cash' && (
+              {isSplit ? (
+                <>
+                  <div className="font-semibold text-slate-700 dark:text-slate-300 mb-1">Split Payment</div>
+                  {(data.paymentLines ?? []).map((line, i) => {
+                    const label = PAYMENT_METHODS.find(m => m.value === line.method)?.label ?? line.method;
+                    const lineChange = (line.method === 'cash' && line.amountTendered && line.amountTendered > line.amount)
+                      ? line.amountTendered - line.amount : 0;
+                    return (
+                      <div key={i} className="pl-1 space-y-0.5">
+                        <div className="flex justify-between">
+                          <span>{label}</span>
+                          <span className="font-medium text-slate-900 dark:text-white">{CURRENCY}{fmt(line.amount)}</span>
+                        </div>
+                        {line.reference && (
+                          <div className="flex justify-between pl-2 text-[10px] text-slate-400">
+                            <span>Ref:</span><span className="font-mono">{line.reference}</span>
+                          </div>
+                        )}
+                        {line.method === 'cash' && line.amountTendered && line.amountTendered > 0 && (
+                          <div className="flex justify-between pl-2 text-[10px] text-slate-400">
+                            <span>Tendered:</span><span>{CURRENCY}{fmt(line.amountTendered)}</span>
+                          </div>
+                        )}
+                        {lineChange > 0 && (
+                          <div className="flex justify-between pl-2 text-[10px] font-semibold text-slate-700 dark:text-slate-200">
+                            <span>Change:</span><span>{CURRENCY}{fmt(lineChange)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {splitCashChange > 0 && (
+                    <div className="flex justify-between font-semibold text-slate-900 dark:text-white pt-0.5 border-t border-dashed border-slate-300 dark:border-slate-600">
+                      <span>Total Change Due</span>
+                      <span>{CURRENCY}{fmt(splitCashChange)}</span>
+                    </div>
+                  )}
+                </>
+              ) : (
                 <>
                   <div className="flex justify-between">
-                    <span>Tendered</span>
-                    <span>{CURRENCY}{fmt(data.amountTendered)}</span>
+                    <span>Payment</span>
+                    <span className="font-medium text-slate-900 dark:text-white">{methodLabel}</span>
                   </div>
-                  <div className="flex justify-between font-semibold text-slate-900 dark:text-white">
-                    <span>Change</span>
-                    <span>{CURRENCY}{fmt(change)}</span>
-                  </div>
+                  {data.paymentReference && (
+                    <div className="flex justify-between">
+                      <span>Reference</span>
+                      <span className="font-mono">{data.paymentReference}</span>
+                    </div>
+                  )}
+                  {data.amountTendered && data.paymentMethod === 'cash' && (
+                    <>
+                      <div className="flex justify-between">
+                        <span>Tendered</span>
+                        <span>{CURRENCY}{fmt(data.amountTendered)}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold text-slate-900 dark:text-white">
+                        <span>Change</span>
+                        <span>{CURRENCY}{fmt(singleCashChange)}</span>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -584,6 +658,9 @@ function RefundModal({ onClose }: { onClose: () => void }) {
 }
 
 // ─── Payment Modal ────────────────────────────────────────────────────────────
+let _lineIdCounter = 0;
+const nextLineId = () => ++_lineIdCounter;
+
 function PaymentModal({
   total,
   hasCustomer,
@@ -592,72 +669,120 @@ function PaymentModal({
 }: {
   total: number;
   hasCustomer: boolean;
-  onConfirm: (method: PaymentMethod, reference: string, amountTendered: number, creditDueDate?: string) => void;
+  onConfirm: (lines: ConfirmedPaymentLine[], creditDueDate?: string) => void;
   onClose: () => void;
 }) {
-  const [method, setMethod] = useState<ModalPaymentMethod>('cash');
-  const [reference, setReference] = useState('');
-  const [amountTendered, setAmountTendered] = useState('');
+  const [mode, setMode] = useState<'payment' | 'credit'>('payment');
   const [creditDueDate, setCreditDueDate] = useState('');
+  const [lines, setLines] = useState<PaymentLineInput[]>([
+    { id: nextLineId(), method: 'cash', amount: fmt(total).replace(/,/g, ''), reference: '', amountTendered: '' },
+  ]);
 
-  const isCredit = method === 'credit';
-  const selectedMethod = PAYMENT_METHODS.find(m => m.value === method);
-  const tendered = parseFloat(amountTendered) || 0;
-  const change = Math.max(0, tendered - total);
-  const canConfirm = isCredit
-    ? hasCustomer && creditDueDate.length > 0
-    : method === 'cash'
-    ? tendered >= total
-    : !selectedMethod?.requiresRef || reference.trim().length > 0;
+  const totalPaid = lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+  const remaining = Math.max(0, total - totalPaid);
+  const overpaid = Math.max(0, totalPaid - total);
+
+  const updateLine = (id: number, patch: Partial<PaymentLineInput>) => {
+    setLines(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+  };
+
+  const addLine = () => {
+    setLines(prev => [
+      ...prev,
+      { id: nextLineId(), method: 'cash', amount: remaining > 0 ? fmt(remaining).replace(/,/g, '') : '', reference: '', amountTendered: '' },
+    ]);
+  };
+
+  const removeLine = (id: number) => {
+    setLines(prev => prev.filter(l => l.id !== id));
+  };
+
+  const isCredit = mode === 'credit';
+
+  const canConfirmPayment = (() => {
+    if (lines.length === 0) return false;
+    if (totalPaid < total - 0.01) return false;
+    // Overpayment only allowed if a cash line is present (cashier gives change)
+    if (totalPaid > total + 0.01) {
+      const hasCash = lines.some(l => l.method === 'cash');
+      if (!hasCash) return false;
+    }
+    for (const l of lines) {
+      const amt = parseFloat(l.amount) || 0;
+      if (amt <= 0) return false;
+      const meta = PAYMENT_METHODS.find(m => m.value === l.method);
+      if (meta?.requiresRef && !l.reference.trim()) return false;
+      if (l.method === 'cash') {
+        // Treat empty amountTendered as exact (valid)
+        const tendered = parseFloat(l.amountTendered);
+        if (!isNaN(tendered) && tendered < amt) return false;
+      }
+    }
+    return true;
+  })();
+
+  const canConfirmCredit = isCredit && hasCustomer && creditDueDate.length > 0;
 
   const handleConfirm = () => {
-    if (!canConfirm) return;
     if (isCredit) {
-      onConfirm('cash', '', 0, creditDueDate);
+      if (!canConfirmCredit) return;
+      onConfirm([{ method: 'cash', amount: total }], creditDueDate);
     } else {
-      onConfirm(method as PaymentMethod, reference.trim(), tendered);
+      if (!canConfirmPayment) return;
+      const confirmed: ConfirmedPaymentLine[] = lines.map(l => ({
+        method: l.method,
+        amount: parseFloat(l.amount) || 0,
+        reference: l.reference.trim() || undefined,
+        amountTendered: l.method === 'cash' ? (parseFloat(l.amountTendered) || parseFloat(l.amount) || 0) : undefined,
+      }));
+      onConfirm(confirmed);
     }
   };
 
+  const cashChange = (() => {
+    let change = 0;
+    for (const l of lines) {
+      if (l.method === 'cash') {
+        const amt = parseFloat(l.amount) || 0;
+        const tendered = parseFloat(l.amountTendered) || 0;
+        change += Math.max(0, tendered - amt);
+      }
+    }
+    return change + overpaid;
+  })();
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-100 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-100 dark:border-slate-700 max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
           <h3 className="font-bold text-slate-900 dark:text-white">Payment</h3>
           <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="overflow-y-auto flex-1 p-5 space-y-4">
           {/* Amount due */}
           <div className="text-center py-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl">
             <div className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold uppercase tracking-wider">Amount Due</div>
             <div className="text-3xl font-bold text-indigo-700 dark:text-indigo-300 mt-1">{CURRENCY}{fmt(total)}</div>
           </div>
 
-          {/* Payment method selection */}
-          <div>
-            <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Payment Method</label>
-            <div className="grid grid-cols-1 gap-2 mt-2">
-              {ALL_MODAL_METHODS.map(m => (
-                <button
-                  key={m.value}
-                  onClick={() => { setMethod(m.value); setReference(''); setAmountTendered(''); setCreditDueDate(''); }}
-                  className={clsx(
-                    'flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-sm font-semibold transition-all text-left',
-                    method === m.value
-                      ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300'
-                      : 'border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-indigo-300 dark:hover:border-indigo-600 bg-white dark:bg-slate-700'
-                  )}
-                >
-                  <span className={clsx('w-3 h-3 rounded-full flex-shrink-0', m.color)} />
-                  {m.label}
-                  {method === m.value && <CheckCircle size={14} className="ml-auto text-indigo-600 dark:text-indigo-400" />}
-                </button>
-              ))}
-            </div>
+          {/* Mode toggle */}
+          <div className="flex rounded-xl overflow-hidden border border-slate-200 dark:border-slate-600">
+            <button
+              onClick={() => setMode('payment')}
+              className={clsx('flex-1 py-2 text-sm font-semibold transition-colors', mode === 'payment' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600')}
+            >
+              Pay Now
+            </button>
+            <button
+              onClick={() => setMode('credit')}
+              className={clsx('flex-1 py-2 text-sm font-semibold transition-colors', mode === 'credit' ? 'bg-orange-500 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600')}
+            >
+              Pay Later (Credit)
+            </button>
           </div>
 
-          {/* Credit sale: due date + customer warning */}
+          {/* Credit mode */}
           {isCredit && (
             <div className="space-y-3">
               {!hasCustomer && (
@@ -683,53 +808,146 @@ function PaymentModal({
             </div>
           )}
 
-          {/* Cash: amount tendered & change */}
-          {method === 'cash' && (
+          {/* Payment lines */}
+          {!isCredit && (
             <div className="space-y-3">
-              <div>
-                <label className="label dark:text-slate-300 text-xs">Amount Tendered ({CURRENCY})</label>
-                <input
-                  type="number"
-                  min={total}
-                  step="0.50"
-                  value={amountTendered}
-                  onChange={e => setAmountTendered(e.target.value)}
-                  placeholder={fmt(total)}
-                  className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white text-lg font-bold"
-                  autoFocus
-                />
-              </div>
-              {tendered >= total && tendered > 0 && (
-                <div className="flex justify-between items-center bg-emerald-50 dark:bg-emerald-900/20 rounded-xl px-4 py-3 border border-emerald-200 dark:border-emerald-800">
-                  <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Change Due</span>
-                  <span className="text-xl font-bold text-emerald-700 dark:text-emerald-400">{CURRENCY}{fmt(change)}</span>
+              {lines.map((line, idx) => {
+                const meta = PAYMENT_METHODS.find(m => m.value === line.method);
+                const tendered = parseFloat(line.amountTendered) || 0;
+                const lineAmt = parseFloat(line.amount) || 0;
+                const lineChange = line.method === 'cash' && tendered > lineAmt ? tendered - lineAmt : 0;
+                const showChange = line.method === 'cash' && (tendered >= lineAmt && tendered > 0);
+
+                return (
+                  <div key={line.id} className="rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/40 p-3 space-y-2.5">
+                    {/* Line header */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        {lines.length > 1 ? `Payment ${idx + 1}` : 'Payment Method'}
+                      </span>
+                      {lines.length > 1 && (
+                        <button onClick={() => removeLine(line.id)} className="p-0.5 rounded text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Method selector */}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {PAYMENT_METHODS.map(m => (
+                        <button
+                          key={m.value}
+                          onClick={() => updateLine(line.id, { method: m.value, reference: '', amountTendered: '' })}
+                          className={clsx(
+                            'flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-semibold transition-all text-left',
+                            line.method === m.value
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
+                              : 'border-slate-200 dark:border-slate-500 text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-700 hover:border-indigo-300'
+                          )}
+                        >
+                          <span className={clsx('w-2 h-2 rounded-full flex-shrink-0', m.color)} />
+                          <span className="truncate">{m.label}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Amount */}
+                    <div>
+                      <label className="text-xs text-slate-500 dark:text-slate-400 font-medium">Amount ({CURRENCY})</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={line.amount}
+                        onChange={e => updateLine(line.id, { amount: e.target.value })}
+                        placeholder="0.00"
+                        className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white font-bold text-base mt-1"
+                        autoFocus={idx === 0}
+                      />
+                    </div>
+
+                    {/* Cash: amount tendered */}
+                    {line.method === 'cash' && (
+                      <div>
+                        <label className="text-xs text-slate-500 dark:text-slate-400 font-medium">Amount Tendered ({CURRENCY})</label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.50"
+                          value={line.amountTendered}
+                          onChange={e => updateLine(line.id, { amountTendered: e.target.value })}
+                          placeholder={line.amount || fmt(total)}
+                          className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white mt-1"
+                        />
+                        {showChange && (
+                          <div className="flex justify-between items-center mt-1.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-3 py-1.5 border border-emerald-200 dark:border-emerald-800">
+                            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">Change Due</span>
+                            <span className="text-sm font-bold text-emerald-700 dark:text-emerald-400">{CURRENCY}{fmt(lineChange + (lineChange === 0 ? Math.max(0, totalPaid - total) : 0))}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Reference for mobile money / bank */}
+                    {meta?.requiresRef && (
+                      <div>
+                        <label className="text-xs text-slate-500 dark:text-slate-400 font-medium">Transaction Reference</label>
+                        <input
+                          type="text"
+                          value={line.reference}
+                          onChange={e => updateLine(line.id, { reference: e.target.value })}
+                          placeholder="MoMo ID or bank ref"
+                          className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white font-mono mt-1 text-sm"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Running total */}
+              {lines.length > 1 && (
+                <div className={clsx(
+                  'rounded-xl px-4 py-3 text-sm flex justify-between items-center border',
+                  remaining === 0 || totalPaid >= total
+                    ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400'
+                    : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400'
+                )}>
+                  <span className="font-semibold">{remaining > 0 ? 'Remaining' : 'Total Paid'}</span>
+                  <span className="font-bold text-base">
+                    {remaining > 0 ? `-${CURRENCY}${fmt(remaining)}` : `${CURRENCY}${fmt(totalPaid)}`}
+                  </span>
                 </div>
+              )}
+
+              {cashChange > 0 && lines.length > 1 && (
+                <div className="flex justify-between items-center bg-emerald-50 dark:bg-emerald-900/20 rounded-xl px-4 py-3 border border-emerald-200 dark:border-emerald-800">
+                  <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Total Change Due</span>
+                  <span className="text-xl font-bold text-emerald-700 dark:text-emerald-400">{CURRENCY}{fmt(cashChange)}</span>
+                </div>
+              )}
+
+              {/* Add payment method button */}
+              {remaining > 0 && (
+                <button
+                  onClick={addLine}
+                  className="w-full py-2.5 rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-600 text-indigo-600 dark:text-indigo-400 text-sm font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Plus size={14} /> Add another payment method
+                </button>
               )}
             </div>
           )}
+        </div>
 
-          {/* Mobile money / bank: reference number */}
-          {!isCredit && method !== 'cash' && selectedMethod?.requiresRef && (
-            <div>
-              <label className="label dark:text-slate-300 text-xs">Transaction Reference / ID</label>
-              <input
-                type="text"
-                value={reference}
-                onChange={e => setReference(e.target.value)}
-                placeholder="e.g. 8829XXXXXX or bank ref"
-                className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white font-mono"
-                autoFocus
-              />
-              <p className="text-xs text-slate-400 mt-1">Enter the MoMo transaction ID or bank reference</p>
-            </div>
-          )}
-
+        {/* Confirm button */}
+        <div className="p-5 pt-0 flex-shrink-0">
           <button
             onClick={handleConfirm}
-            disabled={!canConfirm}
+            disabled={isCredit ? !canConfirmCredit : !canConfirmPayment}
             className={clsx(
               'w-full py-3.5 rounded-xl font-bold text-base transition-all',
-              canConfirm
+              (isCredit ? canConfirmCredit : canConfirmPayment)
                 ? isCredit
                   ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-md'
                   : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200 dark:shadow-indigo-900/40'
@@ -738,8 +956,8 @@ function PaymentModal({
           >
             {isCredit
               ? (hasCustomer ? 'Record Credit Sale' : 'Select a customer first')
-              : method === 'cash' && tendered < total && tendered > 0
-              ? `Need ${CURRENCY}${fmt(total - tendered)} more`
+              : remaining > 0
+              ? `Still need ${CURRENCY}${fmt(remaining)}`
               : 'Confirm Payment'}
           </button>
         </div>
@@ -954,7 +1172,7 @@ export default function POS() {
     .filter(s => !search || s.name.toLowerCase().includes(search.toLowerCase()) || (s.description || '').toLowerCase().includes(search.toLowerCase()));
 
   // ─── Checkout ──────────────────────────────────────────────────────────────
-  const handlePaymentConfirm = async (method: PaymentMethod, reference: string, amountTendered: number, creditDueDate?: string) => {
+  const handlePaymentConfirm = async (lines: ConfirmedPaymentLine[], creditDueDate?: string) => {
     const isCredit = !!creditDueDate;
     if (isCredit && !customer) {
       showToast('error', 'Credit sales require a customer.');
@@ -962,6 +1180,11 @@ export default function POS() {
     }
     setShowPaymentModal(false);
     setProcessing(true);
+
+    // Derive primary method for backward-compat (largest line)
+    const primaryLine = lines.reduce((a, b) => b.amount > a.amount ? b : a, lines[0]);
+    const isSplit = lines.length > 1;
+
     try {
       const result = await posApi.createSale({
         customerId: customer?.id,
@@ -979,8 +1202,9 @@ export default function POS() {
         discountAmount: String(discountAmount),
         taxAmount: '0',
         totalAmount: String(total),
-        paymentMethod: method,
-        paymentReference: reference || undefined,
+        paymentMethod: primaryLine?.method ?? 'cash',
+        paymentReference: primaryLine?.reference || undefined,
+        paymentLines: isSplit ? lines : undefined,
         isCredit,
         creditDueDate: creditDueDate || undefined,
       });
@@ -990,9 +1214,10 @@ export default function POS() {
         saleNumber: result.saleNumber,
         cashierName: result.cashierName ?? user?.name ?? 'Cashier',
         customerName: customer?.name,
-        paymentMethod: isCredit ? 'credit' : method,
-        paymentReference: reference || undefined,
-        amountTendered: isCredit ? 0 : amountTendered,
+        paymentMethod: isCredit ? 'credit' : (primaryLine?.method ?? 'cash'),
+        paymentReference: primaryLine?.reference || undefined,
+        amountTendered: isCredit ? 0 : (primaryLine?.amountTendered ?? 0),
+        paymentLines: isSplit ? lines : undefined,
         items: cart,
         subtotal,
         discountAmount,
