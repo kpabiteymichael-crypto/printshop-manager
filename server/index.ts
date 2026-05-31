@@ -32,6 +32,11 @@ import productsRoutes from './routes/products';
 import settingsRoutes from './routes/settings';
 import notificationRoutes from './routes/notifications';
 import debtsRoutes from './routes/debts';
+import businessAnalyticsRoutes from './routes/business-analytics';
+import receiptsRoutes from './routes/receipts';
+import quotationsRoutes from './routes/quotations';
+import invoicesRoutes from './routes/invoices';
+import pdfRoutes from './routes/pdf';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -164,6 +169,16 @@ app.use('/api/products', productsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/debts', debtsRoutes);
+app.use('/api/analytics', businessAnalyticsRoutes);
+app.use('/api/receipts', receiptsRoutes);
+app.use('/api/quotations', quotationsRoutes);
+app.use('/api/invoices', invoicesRoutes);
+app.use('/api/pdf', pdfRoutes);
+
+// Alias routes matching the documented API contract
+app.get('/api/receipts/:id/pdf', (req: any, _res: any, next: any) => { req.url = `/receipt/${req.params.id}`; next(); }, pdfRoutes);
+app.get('/api/quotations/:id/pdf', (req: any, _res: any, next: any) => { req.url = `/quotation/${req.params.id}`; next(); }, pdfRoutes);
+app.get('/api/invoices/:id/pdf', (req: any, _res: any, next: any) => { req.url = `/invoice/${req.params.id}`; next(); }, pdfRoutes);
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads')));
 

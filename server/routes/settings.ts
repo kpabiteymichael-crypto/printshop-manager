@@ -31,17 +31,40 @@ router.put('/', authorize('owner'), async (req, res) => {
 
 router.get('/staff', authorize('owner', 'manager'), async (_req, res) => {
   try {
-    const staff = await db.select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      role: users.role,
-      phone: users.phone,
-      isActive: users.isActive,
-      createdAt: users.createdAt,
-    }).from(users);
+    const result = await db.execute(sql`
+      SELECT
+        u.id, u.name, u.email, u.role, u.phone, u.is_active, u.created_at, u.last_login_at,
+        COUNT(DISTINCT s.id) as total_sales,
+        COALESCE(SUM(s.total_amount), 0) as total_revenue,
+        COUNT(DISTINCT pj.id) as print_jobs_count,
+        MAX(s.created_at) as last_sale_at
+      FROM users u
+      LEFT JOIN sales s ON s.cashier_id = u.id
+        AND s.created_at >= NOW() - INTERVAL '30 days'
+      LEFT JOIN print_jobs pj ON pj.assigned_to = u.id
+        AND pj.created_at >= NOW() - INTERVAL '30 days'
+      GROUP BY u.id, u.name, u.email, u.role, u.phone, u.is_active, u.created_at, u.last_login_at
+      ORDER BY u.created_at ASC
+    `);
+    const staff = (result as any).rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      email: r.email,
+      role: r.role,
+      phone: r.phone,
+      isActive: r.is_active,
+      createdAt: r.created_at,
+      lastLoginAt: r.last_login_at,
+      totalSales: Number(r.total_sales ?? 0),
+      totalRevenue: parseFloat(r.total_revenue ?? 0),
+      printJobsCount: Number(r.print_jobs_count ?? 0),
+      lastSaleAt: r.last_sale_at,
+    }));
     return res.json(staff);
-  } catch { return res.status(500).json({ error: 'Failed to fetch staff' }); }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch staff' });
+  }
 });
 
 router.post('/staff', authorize('owner'), async (req, res) => {
@@ -89,6 +112,51 @@ router.put('/staff/:id', authorize('owner'), async (req, res) => {
   } catch (err: any) {
     if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
     return res.status(500).json({ error: 'Failed to update staff' });
+  }
+});
+
+// GET /api/settings/staff/activity — recent staff activity
+router.get('/staff/activity', authorize('owner', 'manager'), async (req, res) => {
+  try {
+    const { sql } = await import('drizzle-orm');
+    const { db } = await import('../db/index');
+    const userId = req.query.userId ? Number(req.query.userId) : null;
+
+    // Combine sales, print_jobs completions as activity
+    const salesActivity = await db.execute(sql`
+      SELECT s.id, s.cashier_id as user_id, u.name as user_name,
+             'sale' as activity_type,
+             'Processed sale ' || s.sale_number || ' — ₵' || s.total_amount as description,
+             s.created_at
+      FROM sales s
+      JOIN users u ON u.id = s.cashier_id
+      ${userId ? sql`WHERE s.cashier_id = ${userId}` : sql``}
+      ORDER BY s.created_at DESC
+      LIMIT 50
+    `);
+
+    const printActivity = await db.execute(sql`
+      SELECT pj.id, pj.assigned_to as user_id, u.name as user_name,
+             'print_job' as activity_type,
+             'Print job ' || pj.job_number || ' — ' || pj.status as description,
+             pj.updated_at as created_at
+      FROM print_jobs pj
+      JOIN users u ON u.id = pj.assigned_to
+      WHERE pj.assigned_to IS NOT NULL
+      ${userId ? sql`AND pj.assigned_to = ${userId}` : sql``}
+      ORDER BY pj.updated_at DESC
+      LIMIT 50
+    `);
+
+    const allActivity = [
+      ...(salesActivity as any).rows.map((r: any) => ({ ...r, activityType: r.activity_type, userName: r.user_name, createdAt: r.created_at })),
+      ...(printActivity as any).rows.map((r: any) => ({ ...r, activityType: r.activity_type, userName: r.user_name, createdAt: r.created_at })),
+    ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 100);
+
+    return res.json(allActivity);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch activity' });
   }
 });
 

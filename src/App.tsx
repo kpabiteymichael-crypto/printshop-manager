@@ -19,6 +19,9 @@ const Reports       = lazy(() => import('./pages/Reports'));
 const Staff         = lazy(() => import('./pages/Staff'));
 const Settings      = lazy(() => import('./pages/Settings'));
 const Debts         = lazy(() => import('./pages/Debts'));
+const Receipts      = lazy(() => import('./pages/Receipts'));
+const Quotations    = lazy(() => import('./pages/Quotations'));
+const Invoices      = lazy(() => import('./pages/Invoices'));
 
 function PageLoader() {
   return (
@@ -130,8 +133,26 @@ export default function App() {
                   </ProtectedRoute>
                 } />
 
+                <Route path="receipts" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><Receipts /></Suspense>
+                  </ProtectedRoute>
+                } />
+
+                <Route path="quotations" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><Quotations /></Suspense>
+                  </ProtectedRoute>
+                } />
+
+                <Route path="invoices" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><Invoices /></Suspense>
+                  </ProtectedRoute>
+                } />
+
                 <Route path="staff" element={
-                  <ProtectedRoute roles={['owner']}>
+                  <ProtectedRoute roles={['owner', 'manager']}>
                     <Suspense fallback={<PageLoader />}><Staff /></Suspense>
                   </ProtectedRoute>
                 } />

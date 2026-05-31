@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
-import { sales, saleItems, expenses, printJobs, customers, products, inventoryItems, cashSessions } from '../db/schema';
+import { sales, saleItems, expenses, printJobs, customers, products, inventoryItems, cashSessions, debts } from '../db/schema';
 import { sql, eq, gte, desc } from 'drizzle-orm';
 
 const router = Router();
@@ -110,6 +110,10 @@ router.get('/summary', authenticate, authorize('owner', 'manager'), async (_req,
       },
     };
 
+    const [totalDebt] = await db.select({
+      total: sql<string>`COALESCE(SUM(balance), 0)`,
+    }).from(debts).where(eq(debts.status, 'open'));
+
     return res.json({
       todaySales: { count: Number(salesToday.count), total: parseFloat(salesToday.total) },
       todayExpenses: parseFloat(expensesToday.total),
@@ -124,6 +128,7 @@ router.get('/summary', authenticate, authorize('owner', 'manager'), async (_req,
       openSession: openSession || null,
       monthlySales,
       profit: profitData,
+      outstandingDebts: parseFloat(totalDebt.total),
     });
   } catch (err) {
     console.error(err);

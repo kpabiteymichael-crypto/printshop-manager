@@ -603,6 +603,69 @@ export async function runMigrations() {
     END $$;
   `);
 
+  // Create quotations table
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS quotations (
+      id SERIAL PRIMARY KEY,
+      qt_number TEXT NOT NULL,
+      customer_id INTEGER REFERENCES customers(id),
+      customer_name TEXT,
+      valid_until TIMESTAMP,
+      notes TEXT,
+      total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'draft',
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS quotations_number_idx ON quotations(qt_number);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS quotation_items (
+      id SERIAL PRIMARY KEY,
+      quotation_id INTEGER NOT NULL REFERENCES quotations(id) ON DELETE CASCADE,
+      description TEXT NOT NULL,
+      quantity DECIMAL(10,2) NOT NULL DEFAULT 1,
+      unit_price DECIMAL(10,2) NOT NULL DEFAULT 0,
+      total DECIMAL(10,2) NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS qi_quotation_idx ON quotation_items(quotation_id);
+  `);
+
+  // Create invoices table
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS invoices (
+      id SERIAL PRIMARY KEY,
+      inv_number TEXT NOT NULL,
+      customer_id INTEGER REFERENCES customers(id),
+      customer_name TEXT,
+      due_date TIMESTAMP,
+      notes TEXT,
+      total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      payment_status TEXT NOT NULL DEFAULT 'unpaid',
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS invoices_number_idx ON invoices(inv_number);
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS invoice_items (
+      id SERIAL PRIMARY KEY,
+      invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+      description TEXT NOT NULL,
+      quantity DECIMAL(10,2) NOT NULL DEFAULT 1,
+      unit_price DECIMAL(10,2) NOT NULL DEFAULT 0,
+      total DECIMAL(10,2) NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS ii_invoice_idx ON invoice_items(invoice_id);
+  `);
+
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP;
+  `);
+
   console.log('Migrations completed successfully!');
 }
-// This is appended at import time — actual additions are inline below

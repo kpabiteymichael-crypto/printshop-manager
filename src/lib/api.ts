@@ -161,11 +161,73 @@ export const debtsApi = {
   addPayment: (id: number, data: object) => api.post(`/debts/${id}/payments`, data).then(r => r.data),
 };
 
+// ─── Analytics ────────────────────────────────────────────
+export const analyticsApi = {
+  salesSummary: (period?: string) =>
+    api.get('/analytics/sales-summary', { params: { period } }).then(r => r.data),
+  revenueTrend: (days?: number) =>
+    api.get('/analytics/revenue-trend', { params: { days } }).then(r => r.data),
+  topProducts: (limit?: number, days?: number) =>
+    api.get('/analytics/top-products', { params: { limit, days } }).then(r => r.data),
+  topCustomers: (limit?: number, days?: number) =>
+    api.get('/analytics/top-customers', { params: { limit, days } }).then(r => r.data),
+  printStats: () => api.get('/analytics/print-stats').then(r => r.data),
+  financialSummary: (months?: number) =>
+    api.get('/analytics/financial-summary', { params: { months } }).then(r => r.data),
+  insights: () => api.get('/analytics/insights').then(r => r.data),
+};
+
+// ─── Receipts ─────────────────────────────────────────────
+export const receiptsApi = {
+  list: () => api.get('/receipts').then(r => r.data),
+  get: (id: number) => api.get(`/receipts/${id}`).then(r => r.data),
+};
+
+// ─── Quotations ───────────────────────────────────────────
+export const quotationsApi = {
+  list: () => api.get('/quotations').then(r => r.data),
+  get: (id: number) => api.get(`/quotations/${id}`).then(r => r.data),
+  create: (data: object) => api.post('/quotations', data).then(r => r.data),
+  delete: (id: number) => api.delete(`/quotations/${id}`).then(r => r.data),
+};
+
+// ─── Invoices ─────────────────────────────────────────────
+export const invoicesApi = {
+  list: () => api.get('/invoices').then(r => r.data),
+  get: (id: number) => api.get(`/invoices/${id}`).then(r => r.data),
+  create: (data: object) => api.post('/invoices', data).then(r => r.data),
+  updatePaymentStatus: (id: number, paymentStatus: string) =>
+    api.patch(`/invoices/${id}/payment-status`, { paymentStatus }).then(r => r.data),
+  delete: (id: number) => api.delete(`/invoices/${id}`).then(r => r.data),
+};
+
 // ─── Reports ──────────────────────────────────────────────
 export const reportsApi = {
   salesSummary: (from?: string, to?: string) =>
     api.get('/reports/sales-summary', { params: { from, to } }).then(r => r.data),
   printJobsSummary: () => api.get('/reports/print-jobs-summary').then(r => r.data),
+  generate: (type: string, from?: string, to?: string) =>
+    api.get(`/reports/${type}`, { params: { from, to } }).then(r => r.data),
+  exportUrl: (type: string, from?: string, to?: string, format: 'csv' | 'xlsx' = 'csv') =>
+    `/api/reports/${type}/export?format=${format}${from ? `&from=${from}` : ''}${to ? `&to=${to}` : ''}`,
+};
+
+// ─── PDF ──────────────────────────────────────────────────
+export const pdfApi = {
+  receiptUrl: (id: number) => `/api/pdf/receipt/${id}`,
+  quotationUrl: (id: number) => `/api/pdf/quotation/${id}`,
+  invoiceUrl: (id: number) => `/api/pdf/invoice/${id}`,
+  download: async (url: string, filename: string) => {
+    const token = localStorage.getItem('ps_token');
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const blob = await response.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(objUrl);
+  },
 };
 
 // ─── Settings ─────────────────────────────────────────────

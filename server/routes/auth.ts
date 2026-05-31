@@ -24,6 +24,7 @@ router.post('/login', async (req, res) => {
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = generateToken({ id: user.id, email: user.email, role: user.role, name: user.name });
+    db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id)).execute().catch(() => {});
     return res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, avatarUrl: user.avatarUrl } });
   } catch (err: any) {
     if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });

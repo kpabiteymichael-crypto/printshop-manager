@@ -9,7 +9,7 @@ import {
   Users, Truck, Wallet, Receipt, BarChart3, UserCog, Settings,
   CreditCard, Bell, LogOut, Menu, X, Sun, Moon, Wifi, WifiOff,
   ChevronRight, ChevronLeft, AlertCircle, CheckCircle, Eye, EyeOff,
-  AlertTriangle,
+  AlertTriangle, FileText, BookMarked,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -31,6 +31,9 @@ const navItems: NavItem[] = [
   { label: 'Cash',        to: '/cash',       icon: <Wallet size={18} />,          roles: ['owner', 'manager', 'cashier'] },
   { label: 'Expenses',    to: '/expenses',   icon: <Receipt size={18} />,         roles: ['owner', 'manager', 'cashier'] },
   { label: 'Debts',       to: '/debts',      icon: <CreditCard size={18} />,      roles: ['owner', 'manager', 'cashier'] },
+  { label: 'Receipts',    to: '/receipts',   icon: <BookMarked size={18} />,      roles: ['owner', 'manager', 'cashier'] },
+  { label: 'Quotations',  to: '/quotations', icon: <FileText size={18} />,        roles: ['owner', 'manager', 'cashier'] },
+  { label: 'Invoices',    to: '/invoices',   icon: <FileText size={18} />,        roles: ['owner', 'manager', 'cashier'] },
   { label: 'Reports',     to: '/reports',    icon: <BarChart3 size={18} />,       roles: ['owner', 'manager'] },
   { label: 'Staff',       to: '/staff',      icon: <UserCog size={18} />,         roles: ['owner'] },
   { label: 'Settings',    to: '/settings',   icon: <Settings size={18} />,        roles: ['owner', 'manager'] },
