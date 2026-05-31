@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 
 const router = Router();
 router.use(authenticate);
+router.use(authorize('owner', 'manager', 'print_operator', 'cashier'));
 
 const VALID_STATUSES = ['pending', 'in_progress', 'printed', 'delivered', 'completed', 'cancelled'] as const;
 

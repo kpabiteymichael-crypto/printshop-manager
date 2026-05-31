@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 const router = Router();
 router.use(authenticate);
+router.use(authorize('owner', 'manager', 'inventory_officer', 'cashier'));
 
 router.get('/categories', async (_req, res) => {
   try { return res.json(await db.select().from(productCategories)); }

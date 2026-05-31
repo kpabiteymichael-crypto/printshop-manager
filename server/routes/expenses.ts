@@ -8,6 +8,7 @@ import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 router.use(authenticate);
+router.use(authorize('owner', 'manager', 'cashier'));
 
 router.get('/categories', async (_req, res) => {
   try { return res.json(await db.select().from(expenseCategories)); }

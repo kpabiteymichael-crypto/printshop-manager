@@ -9,7 +9,7 @@ import bcrypt from 'bcryptjs';
 const router = Router();
 router.use(authenticate);
 
-router.get('/', async (_req, res) => {
+router.get('/', authorize('owner', 'manager'), async (_req, res) => {
   try {
     const rows = await db.select().from(settings);
     const obj: Record<string, string> = {};

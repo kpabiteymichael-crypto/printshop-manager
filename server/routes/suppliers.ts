@@ -8,6 +8,7 @@ import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 router.use(authenticate);
+router.use(authorize('owner', 'manager', 'inventory_officer'));
 
 // ── Purchase order routes (must be BEFORE /:id to avoid conflict) ───────────
 

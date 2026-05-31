@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 const router = Router();
 router.use(authenticate);
+router.use(authorize('owner', 'manager', 'cashier'));
 
 const customerSchema = z.object({
   name: z.string().min(1),
