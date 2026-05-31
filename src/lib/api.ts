@@ -60,7 +60,8 @@ export const posApi = {
   services: () => api.get('/pos/services').then(r => r.data),
   barcodeSearch: (sku: string) => api.get(`/pos/barcode/${encodeURIComponent(sku)}`).then(r => r.data),
   createSale: (data: object) => api.post('/pos/sale', data).then(r => r.data),
-  getSales: (sessionId?: number, date?: string) => api.get('/pos/sales', { params: { ...(sessionId ? { sessionId } : {}), ...(date ? { date } : {}) } }).then(r => r.data),
+  getSales: (sessionId?: number, date?: string, filters?: { dateFrom?: string; dateTo?: string; paymentMethod?: string; cashierId?: number }) =>
+    api.get('/pos/sales', { params: { ...(sessionId ? { sessionId } : {}), ...(date ? { date } : {}), ...filters } }).then(r => r.data),
   getSale: (id: number) => api.get(`/pos/sales/${id}`).then(r => r.data),
   getReceipt: (receiptNumber: string) => api.get(`/pos/receipt/${encodeURIComponent(receiptNumber)}`).then(r => r.data),
   refund: (saleId: number, itemIds: number[]) => api.post(`/pos/sales/${saleId}/refund`, { itemIds }).then(r => r.data),

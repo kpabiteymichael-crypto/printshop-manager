@@ -365,10 +365,14 @@ router.post('/sales/:id/refund', authorize('owner', 'manager', 'cashier'), async
 });
 
 // ─── List Sales ───────────────────────────────────────────────────────────────
-router.get('/sales', async (req, res) => {
+router.get('/sales', authorize('owner', 'manager', 'cashier'), async (req, res) => {
   try {
     const sessionId = req.query.sessionId ? Number(req.query.sessionId) : undefined;
-    const dateStr = req.query.date as string | undefined; // YYYY-MM-DD filter
+    const dateStr = req.query.date as string | undefined;
+    const dateFrom = req.query.dateFrom as string | undefined;
+    const dateTo = req.query.dateTo as string | undefined;
+    const paymentMethod = req.query.paymentMethod as string | undefined;
+    const cashierId = req.query.cashierId ? Number(req.query.cashierId) : undefined;
 
     const conditions: any[] = [];
     if (sessionId) conditions.push(eq(sales.cashSessionId, sessionId));
@@ -377,18 +381,31 @@ router.get('/sales', async (req, res) => {
       const end = new Date(`${dateStr}T23:59:59.999Z`);
       conditions.push(sql`sales.created_at >= ${start} AND sales.created_at <= ${end}`);
     }
+    if (dateFrom) {
+      const start = new Date(`${dateFrom}T00:00:00.000Z`);
+      conditions.push(sql`sales.created_at >= ${start}`);
+    }
+    if (dateTo) {
+      const end = new Date(`${dateTo}T23:59:59.999Z`);
+      conditions.push(sql`sales.created_at <= ${end}`);
+    }
+    if (paymentMethod) conditions.push(eq(sales.paymentMethod, paymentMethod as any));
+    if (cashierId) conditions.push(eq(sales.cashierId, cashierId));
 
     const results = await db.select({
       id: sales.id,
       saleNumber: sales.saleNumber,
       cashSessionId: sales.cashSessionId,
+      cashierId: sales.cashierId,
       totalAmount: sales.totalAmount,
       paymentMethod: sales.paymentMethod,
       paymentStatus: sales.paymentStatus,
       createdAt: sales.createdAt,
       customerName: customers.name,
+      cashierName: users.name,
     }).from(sales)
       .leftJoin(customers, eq(sales.customerId, customers.id))
+      .leftJoin(users, eq(sales.cashierId, users.id))
       .where(conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions))
       .orderBy(sql`sales.created_at DESC`);
 
@@ -397,7 +414,7 @@ router.get('/sales', async (req, res) => {
 });
 
 // ─── Get Single Sale ──────────────────────────────────────────────────────────
-router.get('/sales/:id', async (req, res) => {
+router.get('/sales/:id', authorize('owner', 'manager', 'cashier'), async (req, res) => {
   try {
     const [sale] = await db.select({
       id: sales.id,
@@ -419,7 +436,10 @@ router.get('/sales/:id', async (req, res) => {
 
     if (!sale) return res.status(404).json({ error: 'Sale not found' });
     const items = await db.select().from(saleItems).where(eq(saleItems.saleId, sale.id));
-    const [receipt] = await db.select().from(receipts).where(eq(receipts.saleId, sale.id)).limit(1);
+    const [receipt] = await db.select().from(receipts)
+      .where(eq(receipts.saleId, sale.id))
+      .orderBy(sql`id ASC`)
+      .limit(1);
     return res.json({ ...sale, items, receiptNumber: receipt?.receiptNumber });
   } catch { return res.status(500).json({ error: 'Failed to fetch sale' }); }
 });

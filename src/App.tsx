@@ -20,6 +20,7 @@ const Staff         = lazy(() => import('./pages/Staff'));
 const Settings      = lazy(() => import('./pages/Settings'));
 const Debts         = lazy(() => import('./pages/Debts'));
 const Receipts      = lazy(() => import('./pages/Receipts'));
+const SalesHistory  = lazy(() => import('./pages/SalesHistory'));
 const Quotations    = lazy(() => import('./pages/Quotations'));
 const Invoices      = lazy(() => import('./pages/Invoices'));
 
@@ -136,6 +137,12 @@ export default function App() {
                 <Route path="receipts" element={
                   <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
                     <Suspense fallback={<PageLoader />}><Receipts /></Suspense>
+                  </ProtectedRoute>
+                } />
+
+                <Route path="sales" element={
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                    <Suspense fallback={<PageLoader />}><SalesHistory /></Suspense>
                   </ProtectedRoute>
                 } />
 
