@@ -1,9 +1,11 @@
 import { Router } from 'express';
+import type { Response } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
 import { sales, saleItems, expenses, printJobs, users, customers, debts } from '../db/schema';
 import { eq, sql, gte, lte, and, desc } from 'drizzle-orm';
 import * as XLSX from 'xlsx';
+import PDFDocument from 'pdfkit';
 
 const router = Router();
 router.use(authenticate);
@@ -292,6 +294,97 @@ router.get('/:type', async (req, res) => {
   }
 });
 
+// ─── PDF generation helper ───────────────────────────────────────────────────
+// Streams a tabular PDF for any report type directly to the HTTP response.
+// Content-Type is set to application/pdf; Content-Disposition triggers download.
+function streamReportPdf(
+  res: Response,
+  opts: { type: string; title: string; rows: any[]; from?: string; to?: string },
+): void {
+  const { type, title, rows, from, to } = opts;
+  const dateStr = new Date().toISOString().split('T')[0];
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${type}-report-${dateStr}.pdf"`);
+
+  const doc = new PDFDocument({ size: 'A4', margin: 40, autoFirstPage: true });
+  doc.pipe(res);
+
+  // Header banner
+  const PAGE_W = 595.28;
+  const MARGIN = 40;
+  const TABLE_W = PAGE_W - MARGIN * 2;
+
+  doc.rect(0, 0, PAGE_W, 60).fill('#4f46e5');
+  doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
+     .text(`${title} Report`, MARGIN, 16, { width: TABLE_W });
+  doc.fontSize(9).font('Helvetica').fillColor('#c7d2fe')
+     .text(
+       `Generated: ${new Date().toLocaleString('en-GH')}  |  Period: ${from ?? 'All'} → ${to ?? 'Now'}`,
+       MARGIN, 42, { width: TABLE_W },
+     );
+
+  // Column layout — distribute width evenly, cap at 130 pt per column
+  const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
+  const colW = cols.length > 0
+    ? Math.min(130, Math.floor(TABLE_W / cols.length))
+    : TABLE_W;
+
+  let y = 75;
+
+  if (cols.length === 0) {
+    doc.fillColor('#475569').fontSize(10).font('Helvetica')
+       .text('No data for the selected period.', MARGIN, y + 10);
+    doc.end();
+    return;
+  }
+
+  // Column header row
+  doc.fillColor('#e8eaf6').rect(MARGIN, y, TABLE_W, 20).fill();
+  doc.fillColor('#3730a3').fontSize(8).font('Helvetica-Bold');
+  cols.forEach((col, i) => {
+    doc.text(String(col), MARGIN + i * colW, y + 6, { width: colW - 4, lineBreak: false });
+  });
+  y += 20;
+
+  // Data rows
+  doc.font('Helvetica').fontSize(8);
+  rows.forEach((row, idx) => {
+    if (y > 800) {
+      doc.addPage();
+      y = 40;
+      // Repeat header on new page
+      doc.fillColor('#e8eaf6').rect(MARGIN, y, TABLE_W, 20).fill();
+      doc.fillColor('#3730a3').font('Helvetica-Bold');
+      cols.forEach((col, i) => {
+        doc.text(String(col), MARGIN + i * colW, y + 6, { width: colW - 4, lineBreak: false });
+      });
+      y += 20;
+      doc.font('Helvetica').fontSize(8);
+    }
+    if (idx % 2 === 0) {
+      doc.fillColor('#f8fafc').rect(MARGIN, y, TABLE_W, 16).fill();
+    }
+    doc.fillColor('#1e293b');
+    cols.forEach((col, i) => {
+      const val = row[col];
+      let txt = val === null || val === undefined ? '—' : String(val);
+      // Truncate long values to fit column
+      if (txt.length > 22) txt = txt.slice(0, 21) + '…';
+      doc.text(txt, MARGIN + i * colW, y + 4, { width: colW - 4, lineBreak: false });
+    });
+    y += 16;
+  });
+
+  // Footer: row count
+  y += 8;
+  if (y > 800) { doc.addPage(); y = 40; }
+  doc.fillColor('#94a3b8').fontSize(8).font('Helvetica')
+     .text(`${rows.length} row${rows.length !== 1 ? 's' : ''} exported`, MARGIN, y);
+
+  doc.end();
+}
+
 // Export endpoint
 router.get('/:type/export', async (req, res) => {
   try {
@@ -368,7 +461,7 @@ router.get('/:type/export', async (req, res) => {
     } else if (type === 'cash-flow') {
       const result = await db.execute(sql`
         SELECT DATE(created_at) as "Date", 'Sale' as "Type", sale_number as "Reference",
-               total_amount as "Amount", payment_method as "Method"
+               total_amount as "Amount", payment_method::text as "Method"
         FROM sales WHERE created_at >= ${fromDate} AND created_at <= ${toDate}
         UNION ALL
         SELECT DATE(expense_date), 'Expense', COALESCE(reference_number, description),
@@ -437,41 +530,7 @@ router.get('/:type/export', async (req, res) => {
     }
 
     if (format === 'pdf') {
-      const PDFDocument = (await import('pdfkit')).default;
-      const doc = new PDFDocument({ size: 'A4', margin: 40 });
-      const dateStr = new Date().toISOString().split('T')[0];
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${type}-report-${dateStr}.pdf"`);
-      doc.pipe(res);
-
-      doc.rect(0, 0, 595.28, 60).fill('#4f46e5');
-      doc.fillColor('white').fontSize(18).font('Helvetica-Bold').text(title + ' Report', 40, 18);
-      doc.fontSize(10).font('Helvetica').fillColor('#c7d2fe').text(`Generated: ${new Date().toLocaleString('en-GH')}  |  Period: ${from ?? 'All'} → ${to ?? 'Now'}`, 40, 42);
-
-      let y = 80;
-      const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
-      const colW = Math.min(120, (595.28 - 80) / Math.max(cols.length, 1));
-
-      doc.fillColor('#f8fafc').rect(40, y, 515.28, 20).fill();
-      doc.fillColor('#475569').fontSize(8).font('Helvetica-Bold');
-      cols.forEach((col, i) => doc.text(String(col), 40 + i * colW, y + 6, { width: colW - 4 }));
-      y += 20;
-
-      doc.font('Helvetica').fontSize(8);
-      rows.forEach((row, idx) => {
-        if (y > 780) { doc.addPage(); y = 40; }
-        if (idx % 2 === 0) { doc.fillColor('#f8fafc').rect(40, y, 515.28, 16).fill(); }
-        doc.fillColor('#1e293b');
-        cols.forEach((col, i) => {
-          const val = row[col];
-          const txt = val === null || val === undefined ? '—' : String(val);
-          doc.text(txt.slice(0, 20), 40 + i * colW, y + 4, { width: colW - 4 });
-        });
-        y += 16;
-      });
-
-      doc.end();
-      return;
+      return streamReportPdf(res, { type, title, rows, from, to });
     } else if (format === 'csv') {
       const ws = XLSX.utils.json_to_sheet(rows);
       const csv = XLSX.utils.sheet_to_csv(ws);

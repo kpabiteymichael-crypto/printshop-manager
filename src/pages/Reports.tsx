@@ -229,6 +229,8 @@ export default function Reports() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [generated, setGenerated] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<'csv' | 'xlsx' | 'pdf' | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const today = new Date();
   const [from, setFrom] = useState(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]);
@@ -239,25 +241,46 @@ export default function Reports() {
   const generate = () => {
     setLoading(true);
     setGenerated(false);
+    setExportError(null);
     reportsApi.generate(activeReport, activeType.hasDateRange ? from : undefined, activeType.hasDateRange ? to : undefined)
       .then(d => { setData(d); setGenerated(true); })
       .catch(() => {})
       .finally(() => setLoading(false));
   };
 
-  const handleExport = (format: 'csv' | 'xlsx' | 'pdf') => {
-    const token = localStorage.getItem('ps_token');
-    const url = reportsApi.exportUrl(activeReport, activeType.hasDateRange ? from : undefined, activeType.hasDateRange ? to : undefined, format);
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.blob())
-      .then(blob => {
-        const objUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = objUrl;
-        a.download = `${activeReport}-report.${format}`;
-        a.click();
-        URL.revokeObjectURL(objUrl);
-      });
+  const handleExport = async (format: 'csv' | 'xlsx' | 'pdf') => {
+    setExportingFormat(format);
+    setExportError(null);
+    try {
+      const token = localStorage.getItem('ps_token');
+      const url = reportsApi.exportUrl(activeReport, activeType.hasDateRange ? from : undefined, activeType.hasDateRange ? to : undefined, format);
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: 'Export failed' }));
+        throw new Error(body.error ?? `Server returned ${response.status}`);
+      }
+      const blob = await response.blob();
+      const mimeOk = format === 'pdf'
+        ? blob.type === 'application/pdf'
+        : format === 'csv'
+          ? blob.type.includes('text/csv')
+          : blob.type.includes('spreadsheet') || blob.type.includes('excel');
+      if (blob.size === 0 || (!mimeOk && blob.type.startsWith('application/json'))) {
+        throw new Error('Server returned an unexpected response instead of a file');
+      }
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = `${activeReport}-report.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objUrl);
+    } catch (err: any) {
+      setExportError(err.message ?? 'Export failed');
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   const chartData = data?.rows?.slice(0, 30).map((r: any) => ({
@@ -327,16 +350,33 @@ export default function Reports() {
             </div>
 
             {generated && (
-              <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
-                <button onClick={() => handleExport('csv')} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors">
-                  <Download size={14} /> CSV
-                </button>
-                <button onClick={() => handleExport('xlsx')} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors">
-                  <FileSpreadsheet size={14} /> Excel
-                </button>
-                <button onClick={() => handleExport('pdf')} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-xl hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors">
-                  <Download size={14} /> PDF
-                </button>
+              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 space-y-2">
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => handleExport('csv')}
+                    disabled={exportingFormat !== null}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {exportingFormat === 'csv' ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />} CSV
+                  </button>
+                  <button
+                    onClick={() => handleExport('xlsx')}
+                    disabled={exportingFormat !== null}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {exportingFormat === 'xlsx' ? <RefreshCw size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} Excel
+                  </button>
+                  <button
+                    onClick={() => handleExport('pdf')}
+                    disabled={exportingFormat !== null}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-xl hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {exportingFormat === 'pdf' ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />} PDF
+                  </button>
+                </div>
+                {exportError && (
+                  <p className="text-sm text-red-600 dark:text-red-400">{exportError}</p>
+                )}
               </div>
             )}
           </div>
