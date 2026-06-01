@@ -119,6 +119,7 @@ function ReceiptOverlay({
   shopName,
   shopAddress,
   onClose,
+  isReprint = false,
 }: {
   data: {
     receiptNumber: string;
@@ -138,6 +139,7 @@ function ReceiptOverlay({
   shopName: string;
   shopAddress: string;
   onClose: () => void;
+  isReprint?: boolean;
 }) {
   const isSplit = (data.paymentLines?.length ?? 0) > 1;
   const methodLabel = data.paymentMethod === 'credit'
@@ -422,10 +424,11 @@ function ReceiptOverlay({
           </div>
         </div>
 
-        {/* New sale button */}
+        {/* New sale / close button */}
         <div className="p-4 border-t border-slate-100 dark:border-slate-700">
           <button onClick={onClose} className="btn-primary w-full flex items-center justify-center gap-2">
-            <ShoppingCart size={16} /> New Sale
+            {isReprint ? <X size={16} /> : <ShoppingCart size={16} />}
+            {isReprint ? 'Close' : 'New Sale'}
           </button>
         </div>
       </div>
@@ -773,6 +776,228 @@ function RefundModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ─── Reprint Modal ────────────────────────────────────────────────────────────
+function ReprintModal({
+  onReprint,
+  onClose,
+}: {
+  onReprint: (receiptData: any) => void;
+  onClose: () => void;
+}) {
+  const [searchMode, setSearchMode] = useState<'number' | 'date'>('number');
+  const [receiptNum, setReceiptNum] = useState('');
+  const [searchDate, setSearchDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dateResults, setDateResults] = useState<any[]>([]);
+  const [step, setStep] = useState<'search' | 'datelist'>('search');
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState('');
+
+  const buildReceiptData = (data: any) => ({
+    receiptNumber: data.receipt.receiptNumber,
+    saleNumber: data.sale.saleNumber,
+    cashierName: data.sale.cashierName ?? 'Cashier',
+    customerName: data.sale.customerName ?? undefined,
+    paymentMethod: data.sale.paymentMethod,
+    paymentReference: data.sale.paymentReference ?? undefined,
+    paymentLines: data.sale.paymentLines
+      ? (typeof data.sale.paymentLines === 'string'
+          ? JSON.parse(data.sale.paymentLines)
+          : data.sale.paymentLines)
+      : undefined,
+    items: data.items.map((i: any) => ({
+      description: i.description,
+      quantity: i.quantity,
+      unitPrice: parseFloat(i.unitPrice),
+      discount: parseFloat(i.discount ?? '0'),
+    })),
+    subtotal: parseFloat(data.sale.subtotal),
+    discountAmount: parseFloat(data.sale.discountAmount),
+    total: parseFloat(data.sale.totalAmount),
+    createdAt: data.sale.createdAt,
+  });
+
+  const handleSearch = async () => {
+    setSearching(true);
+    setError('');
+    try {
+      if (searchMode === 'number') {
+        if (!receiptNum.trim()) return;
+        const data = await posApi.getReceipt(receiptNum.trim().toUpperCase());
+        onReprint(buildReceiptData(data));
+      } else {
+        const results = await posApi.getSales(undefined, searchDate);
+        setDateResults(results);
+        setStep('datelist');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Receipt not found');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleSelectSale = async (saleId: number) => {
+    setSearching(true);
+    setError('');
+    try {
+      const detail = await posApi.getSale(saleId);
+      if (detail.receiptNumber) {
+        const data = await posApi.getReceipt(detail.receiptNumber);
+        onReprint(buildReceiptData(data));
+      } else {
+        setError('No receipt found for this sale.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load receipt');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-100 dark:border-slate-700">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+          <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Printer size={16} /> Reprint Receipt
+          </h3>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {error && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-xl text-sm border border-red-200 dark:border-red-800">
+              <AlertCircle size={14} /> {error}
+            </div>
+          )}
+
+          {step === 'search' && (
+            <div className="space-y-4">
+              <div className="flex rounded-xl overflow-hidden border border-slate-200 dark:border-slate-600">
+                <button
+                  onClick={() => setSearchMode('number')}
+                  className={`flex-1 py-2 text-sm font-medium transition-colors ${searchMode === 'number' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'}`}
+                >
+                  By Receipt #
+                </button>
+                <button
+                  onClick={() => setSearchMode('date')}
+                  className={`flex-1 py-2 text-sm font-medium transition-colors ${searchMode === 'date' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'}`}
+                >
+                  Browse by Date
+                </button>
+              </div>
+
+              {searchMode === 'number' ? (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Enter the receipt number (e.g. RCP-2026-0001) to look it up and reprint.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      autoFocus
+                      value={receiptNum}
+                      onChange={e => setReceiptNum(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                      placeholder="RCP-2026-0001"
+                      className="input flex-1 dark:bg-slate-700 dark:border-slate-600 dark:text-white font-mono uppercase"
+                    />
+                    <button
+                      onClick={handleSearch}
+                      disabled={!receiptNum.trim() || searching}
+                      className="btn-primary px-4"
+                    >
+                      {searching
+                        ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        : 'Find'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Select a date to browse sales and pick a receipt to reprint.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      value={searchDate}
+                      onChange={e => setSearchDate(e.target.value)}
+                      className="input flex-1 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                    />
+                    <button
+                      onClick={handleSearch}
+                      disabled={!searchDate || searching}
+                      className="btn-primary px-4"
+                    >
+                      {searching
+                        ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        : 'Search'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === 'datelist' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Sales on {searchDate}
+                </p>
+                <button
+                  onClick={() => { setStep('search'); setDateResults([]); setError(''); }}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                  ← Back
+                </button>
+              </div>
+              {searching ? (
+                <div className="flex items-center justify-center py-6">
+                  <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : dateResults.length === 0 ? (
+                <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-4">
+                  No sales found for this date.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {dateResults.map((sale: any) => (
+                    <button
+                      key={sale.id}
+                      onClick={() => handleSelectSale(sale.id)}
+                      disabled={searching}
+                      className="w-full text-left flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors group"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white font-mono">
+                          {sale.saleNumber}
+                        </div>
+                        <div className="text-xs text-slate-400 dark:text-slate-500">
+                          {sale.customerName || 'Walk-in'} · {sale.paymentMethod.replace(/_/g, ' ').toUpperCase()}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-sm font-bold text-slate-900 dark:text-white">
+                          {CURRENCY}{fmt(parseFloat(sale.totalAmount))}
+                        </span>
+                        <Printer size={13} className="text-indigo-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-300 transition-colors" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Payment Modal ────────────────────────────────────────────────────────────
 let _lineIdCounter = 0;
 const nextLineId = () => ++_lineIdCounter;
@@ -1109,7 +1334,9 @@ export default function POS() {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
+  const [showReprintModal, setShowReprintModal] = useState(false);
   const [receipt, setReceipt] = useState<any>(null);
+  const [isReprintReceipt, setIsReprintReceipt] = useState(false);
 
   // Barcode scanner
   const barcodeBuffer = useRef('');
@@ -1410,12 +1637,23 @@ export default function POS() {
         />
       )}
       {showRefundModal && <RefundModal onClose={() => setShowRefundModal(false)} />}
+      {showReprintModal && (
+        <ReprintModal
+          onReprint={(data) => {
+            setIsReprintReceipt(true);
+            setReceipt(data);
+            setShowReprintModal(false);
+          }}
+          onClose={() => setShowReprintModal(false)}
+        />
+      )}
       {receipt && (
         <ReceiptOverlay
           data={receipt}
           shopName={shopName}
           shopAddress={shopAddress}
-          onClose={() => setReceipt(null)}
+          isReprint={isReprintReceipt}
+          onClose={() => { setReceipt(null); setIsReprintReceipt(false); }}
         />
       )}
 
@@ -1433,12 +1671,20 @@ export default function POS() {
               </p>
             )}
           </div>
-          <button
-            onClick={() => setShowRefundModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl hover:border-red-300 hover:text-red-600 dark:hover:text-red-400 transition-all"
-          >
-            <RotateCcw size={14} /> Refund
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowReprintModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl hover:border-indigo-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
+            >
+              <Printer size={14} /> Reprint
+            </button>
+            <button
+              onClick={() => setShowRefundModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl hover:border-red-300 hover:text-red-600 dark:hover:text-red-400 transition-all"
+            >
+              <RotateCcw size={14} /> Refund
+            </button>
+          </div>
         </div>
 
         {/* Search + barcode */}
