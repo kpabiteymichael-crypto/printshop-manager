@@ -76,13 +76,30 @@ export default function Inventory() {
   const [globalHistoryType, setGlobalHistoryType] = useState('');
 
   // ─── Stocktake state ─────────────────────────────────────────────────────────
-  const [stocktakeItems, setStocktakeItems] = useState<StocktakeEntry[]>([]);
+  const [stocktakeItems, setStocktakeItems] = useState<StocktakeEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('ps_stocktake_items');
+      return saved ? (JSON.parse(saved) as StocktakeEntry[]) : [];
+    } catch { return []; }
+  });
   const [stocktakeSearch, setStocktakeSearch] = useState('');
-  const [stocktakeReason, setStocktakeReason] = useState('Physical stocktake');
+  const [stocktakeReason, setStocktakeReason] = useState(() => {
+    try { return localStorage.getItem('ps_stocktake_reason') || 'Physical stocktake'; }
+    catch { return 'Physical stocktake'; }
+  });
   const [stocktakeCommitting, setStocktakeCommitting] = useState(false);
   const [stocktakeDone, setStocktakeDone] = useState<{ committed: number; errors: number } | null>(null);
   const [stocktakeSearchOpen, setStocktakeSearchOpen] = useState(false);
   const stocktakeSearchRef = useRef<HTMLInputElement>(null);
+
+  // ─── Persist stocktake session to localStorage ───────────────────────────────
+  useEffect(() => {
+    localStorage.setItem('ps_stocktake_items', JSON.stringify(stocktakeItems));
+  }, [stocktakeItems]);
+
+  useEffect(() => {
+    localStorage.setItem('ps_stocktake_reason', stocktakeReason);
+  }, [stocktakeReason]);
 
   // ─── Barcode lookup ─────────────────────────────────────────────────────────
   // Opens stock-in or stock-out drawer for the scanned SKU.
@@ -435,6 +452,8 @@ export default function Inventory() {
       setStocktakeDone({ committed, errors });
       setStocktakeItems([]);
       setStocktakeReason('Physical stocktake');
+      localStorage.removeItem('ps_stocktake_items');
+      localStorage.removeItem('ps_stocktake_reason');
       load();
     } catch (err: any) {
       alert(err.message || 'Failed to commit stocktake');
