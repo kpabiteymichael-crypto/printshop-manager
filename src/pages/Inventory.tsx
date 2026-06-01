@@ -40,6 +40,7 @@ export default function Inventory() {
 
   // ─── Barcode scanner state ──────────────────────────────────────────────────
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [barcodeScanMode, setBarcodeScanMode] = useState<'in' | 'out'>('in');
   const [barcodeFlash, setBarcodeFlash] = useState<'success' | 'error' | null>(null);
   const [barcodeMsg, setBarcodeMsg] = useState('');
   const [barcodeLoading, setBarcodeLoading] = useState(false);
@@ -47,6 +48,7 @@ export default function Inventory() {
   const [cameraSupported, setCameraSupported] = useState<boolean | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const drawerBarcodeInputRef = useRef<HTMLInputElement>(null);
+  const drawerStockOutBarcodeInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const cameraRafRef = useRef<number>(0);
@@ -59,13 +61,16 @@ export default function Inventory() {
   const [globalHistoryType, setGlobalHistoryType] = useState('');
 
   // ─── Barcode lookup ─────────────────────────────────────────────────────────
-  // Opens stock-in drawer for the scanned SKU. fromDrawer=true means we're
-  // switching products while the drawer is already open.
-  const handleBarcodeInput = useCallback(async (sku: string, fromDrawer = false) => {
+  // Opens stock-in or stock-out drawer for the scanned SKU.
+  // fromDrawer=true means we're switching products while the drawer is already open.
+  // mode overrides barcodeScanMode when called from a drawer context.
+  const handleBarcodeInput = useCallback(async (sku: string, fromDrawer = false, mode?: 'in' | 'out') => {
     if (!sku.trim() || barcodeLoading) return;
     setBarcodeLoading(true);
     setBarcodeFlash(null);
     setBarcodeMsg('');
+    // Capture the effective mode at call time (avoid stale closure on barcodeScanMode)
+    const effectiveMode = mode ?? barcodeScanMode;
     try {
       const product = await posApi.barcodeSearch(sku.trim());
       const invItem = data.items.find(
@@ -81,9 +86,15 @@ export default function Inventory() {
       setBarcodeMsg(`Found: ${product.name}`);
       if (fromDrawer) {
         // Stay in drawer, just swap the item
-        setShowStockIn(invItem);
-        setStockInForm(f => ({ ...f, costPrice: invItem.productCostPrice || '' }));
-        if (drawerBarcodeInputRef.current) drawerBarcodeInputRef.current.value = '';
+        if (effectiveMode === 'out') {
+          setShowStockOut(invItem);
+          setStockOutForm({ quantity: '1', reason: 'Damaged', notes: '' });
+          if (drawerStockOutBarcodeInputRef.current) drawerStockOutBarcodeInputRef.current.value = '';
+        } else {
+          setShowStockIn(invItem);
+          setStockInForm(f => ({ ...f, costPrice: invItem.productCostPrice || '' }));
+          if (drawerBarcodeInputRef.current) drawerBarcodeInputRef.current.value = '';
+        }
         setTimeout(() => { setBarcodeFlash(null); setBarcodeMsg(''); }, 2000);
       } else {
         setTimeout(() => {
@@ -91,8 +102,13 @@ export default function Inventory() {
           setShowBarcodeScanner(false);
           setBarcodeFlash(null);
           setBarcodeMsg('');
-          setShowStockIn(invItem);
-          setStockInForm({ quantity: '1', costPrice: invItem.productCostPrice || '', supplierId: '', invoiceRef: '', notes: '' });
+          if (effectiveMode === 'out') {
+            setShowStockOut(invItem);
+            setStockOutForm({ quantity: '1', reason: 'Damaged', notes: '' });
+          } else {
+            setShowStockIn(invItem);
+            setStockInForm({ quantity: '1', costPrice: invItem.productCostPrice || '', supplierId: '', invoiceRef: '', notes: '' });
+          }
         }, 600);
       }
     } catch {
@@ -103,7 +119,7 @@ export default function Inventory() {
       setBarcodeLoading(false);
       if (barcodeInputRef.current) barcodeInputRef.current.value = '';
     }
-  }, [barcodeLoading, data.items]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [barcodeLoading, barcodeScanMode, data.items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Camera scanning (BarcodeDetector API) ──────────────────────────────────
   const stopCamera = useCallback(() => {
@@ -336,11 +352,18 @@ export default function Inventory() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowBarcodeScanner(true)}
+            onClick={() => { setBarcodeScanMode('in'); setShowBarcodeScanner(true); }}
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors shadow-sm"
             title="Scan barcode to stock in"
           >
             <Barcode size={16} /> Scan to Stock In
+          </button>
+          <button
+            onClick={() => { setBarcodeScanMode('out'); setShowBarcodeScanner(true); }}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors shadow-sm"
+            title="Scan barcode to stock out"
+          >
+            <Barcode size={16} /> Scan to Stock Out
           </button>
           <button onClick={() => setShowAddProduct(true)} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Product
@@ -574,7 +597,8 @@ export default function Inventory() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
               <div>
                 <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Barcode size={17} className="text-emerald-600" /> Scan to Stock In
+                  <Barcode size={17} className={barcodeScanMode === 'out' ? 'text-red-600' : 'text-emerald-600'} />
+                  {barcodeScanMode === 'out' ? 'Scan to Stock Out' : 'Scan to Stock In'}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   USB scanner, camera, or type SKU manually
@@ -605,7 +629,8 @@ export default function Inventory() {
                   <Barcode size={15} className={clsx(
                     'absolute left-3 top-1/2 -translate-y-1/2 transition-colors pointer-events-none',
                     barcodeFlash === 'success' ? 'text-emerald-500' :
-                    barcodeFlash === 'error' ? 'text-red-500' : 'text-slate-400'
+                    barcodeFlash === 'error' ? 'text-red-500' :
+                    barcodeScanMode === 'out' ? 'text-red-400' : 'text-slate-400'
                   )} />
                   <input
                     ref={barcodeInputRef}
@@ -628,7 +653,7 @@ export default function Inventory() {
                   />
                   {barcodeLoading && (
                     <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      <div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                      <div className={clsx('w-4 h-4 border-2 border-t-transparent rounded-full animate-spin', barcodeScanMode === 'out' ? 'border-red-500' : 'border-emerald-500')} />
                     </div>
                   )}
                 </div>
@@ -650,7 +675,7 @@ export default function Inventory() {
                     />
                     {/* Scan guide overlay */}
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="w-48 h-28 border-2 border-emerald-400 rounded-lg opacity-70" />
+                      <div className={clsx('w-48 h-28 border-2 rounded-lg opacity-70', barcodeScanMode === 'out' ? 'border-red-400' : 'border-emerald-400')} />
                     </div>
                     <button
                       type="button"
@@ -669,11 +694,19 @@ export default function Inventory() {
                       'w-full py-3.5 flex flex-col items-center gap-1.5 transition-colors',
                       cameraSupported === false
                         ? 'opacity-50 cursor-not-allowed bg-slate-50 dark:bg-slate-700/50'
-                        : 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                        : barcodeScanMode === 'out'
+                          ? 'hover:bg-red-50 dark:hover:bg-red-900/20'
+                          : 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
                     )}
                   >
-                    <Camera size={22} className={cameraSupported === false ? 'text-slate-400' : 'text-emerald-600 dark:text-emerald-400'} />
-                    <span className={clsx('text-xs font-semibold', cameraSupported === false ? 'text-slate-400' : 'text-emerald-700 dark:text-emerald-400')}>
+                    <Camera size={22} className={
+                      cameraSupported === false ? 'text-slate-400' :
+                      barcodeScanMode === 'out' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+                    } />
+                    <span className={clsx('text-xs font-semibold',
+                      cameraSupported === false ? 'text-slate-400' :
+                      barcodeScanMode === 'out' ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
+                    )}>
                       {cameraSupported === false ? 'Camera scan not supported in this browser' : 'Tap to scan with camera'}
                     </span>
                     {cameraSupported !== false && (
@@ -728,7 +761,7 @@ export default function Inventory() {
                       if (e.key === 'Enter') {
                         e.preventDefault();
                         const val = (e.target as HTMLInputElement).value.trim();
-                        if (val) handleBarcodeInput(val, true);
+                        if (val) handleBarcodeInput(val, true, 'in');
                       }
                     }}
                     autoComplete="off"
@@ -789,8 +822,8 @@ export default function Inventory() {
       {showStockOut && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowStockOut(null)} />
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-slate-100 dark:border-slate-700">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-slate-100 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800">
               <div>
                 <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2"><ArrowDown size={16} className="text-red-600" /> Stock Out</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">{showStockOut.productName} · {showStockOut.quantityInStock} on hand</p>
@@ -798,6 +831,49 @@ export default function Inventory() {
               <button onClick={() => setShowStockOut(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
             </div>
             <form onSubmit={handleStockOut} className="p-5 space-y-4">
+              {/* Barcode scan input — scan a different product while drawer is open */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/40 px-3 py-2.5">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Barcode size={13} className="text-red-600 flex-shrink-0" />
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Scan a different product</span>
+                </div>
+                <div className="relative">
+                  <input
+                    ref={drawerStockOutBarcodeInputRef}
+                    type="text"
+                    placeholder="Scan barcode or type SKU + Enter…"
+                    className={clsx(
+                      'input py-1.5 text-xs font-mono dark:bg-slate-700 dark:border-slate-600 dark:text-white transition-all',
+                      barcodeFlash === 'success' && 'border-emerald-400 ring-1 ring-emerald-300',
+                      barcodeFlash === 'error' && 'border-red-400 ring-1 ring-red-300',
+                    )}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = (e.target as HTMLInputElement).value.trim();
+                        if (val) handleBarcodeInput(val, true, 'out');
+                      }
+                    }}
+                    autoComplete="off"
+                    disabled={barcodeLoading}
+                  />
+                  {barcodeLoading && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                      <div className="w-3 h-3 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
+                {barcodeFlash === 'success' && barcodeMsg && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                    <CheckCircle size={11} /> {barcodeMsg}
+                  </p>
+                )}
+                {barcodeFlash === 'error' && barcodeMsg && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
+                    <AlertCircle size={11} /> {barcodeMsg}
+                  </p>
+                )}
+              </div>
               <div>
                 <label className="label dark:text-slate-300">Quantity *</label>
                 <input required type="number" min="1" max={showStockOut.quantityInStock} value={stockOutForm.quantity} onChange={e => setStockOutForm(p => ({ ...p, quantity: e.target.value }))} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
