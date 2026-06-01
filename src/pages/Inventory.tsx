@@ -40,7 +40,7 @@ export default function Inventory() {
 
   // ─── Barcode scanner state ──────────────────────────────────────────────────
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
-  const [barcodeScanMode, setBarcodeScanMode] = useState<'in' | 'out'>('in');
+  const [barcodeScanMode, setBarcodeScanMode] = useState<'in' | 'out' | 'adjust'>('in');
   const [barcodeFlash, setBarcodeFlash] = useState<'success' | 'error' | null>(null);
   const [barcodeMsg, setBarcodeMsg] = useState('');
   const [barcodeLoading, setBarcodeLoading] = useState(false);
@@ -49,9 +49,13 @@ export default function Inventory() {
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const drawerBarcodeInputRef = useRef<HTMLInputElement>(null);
   const drawerStockOutBarcodeInputRef = useRef<HTMLInputElement>(null);
+  const drawerAdjustBarcodeInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const cameraRafRef = useRef<number>(0);
+
+  const [showStockAdjust, setShowStockAdjust] = useState<any>(null);
+  const [stockAdjustForm, setStockAdjustForm] = useState({ newQuantity: '', reason: '', notes: '' });
 
   const [history, setHistory] = useState<{ movements: any[]; total: number; page: number; limit: number }>({ movements: [], total: 0, page: 1, limit: 20 });
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -90,6 +94,10 @@ export default function Inventory() {
           setShowStockOut(invItem);
           setStockOutForm({ quantity: '1', reason: 'Damaged', notes: '' });
           if (drawerStockOutBarcodeInputRef.current) drawerStockOutBarcodeInputRef.current.value = '';
+        } else if (effectiveMode === 'adjust') {
+          setShowStockAdjust(invItem);
+          setStockAdjustForm({ newQuantity: String(invItem.quantityInStock), reason: '', notes: '' });
+          if (drawerAdjustBarcodeInputRef.current) drawerAdjustBarcodeInputRef.current.value = '';
         } else {
           setShowStockIn(invItem);
           setStockInForm(f => ({ ...f, costPrice: invItem.productCostPrice || '' }));
@@ -105,6 +113,9 @@ export default function Inventory() {
           if (effectiveMode === 'out') {
             setShowStockOut(invItem);
             setStockOutForm({ quantity: '1', reason: 'Damaged', notes: '' });
+          } else if (effectiveMode === 'adjust') {
+            setShowStockAdjust(invItem);
+            setStockAdjustForm({ newQuantity: String(invItem.quantityInStock), reason: '', notes: '' });
           } else {
             setShowStockIn(invItem);
             setStockInForm({ quantity: '1', costPrice: invItem.productCostPrice || '', supplierId: '', invoiceRef: '', notes: '' });
@@ -280,6 +291,22 @@ export default function Inventory() {
     finally { setSaving(false); }
   };
 
+  const handleStockAdjust = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await inventoryApi.adjust({
+        inventoryItemId: showStockAdjust.id,
+        type: 'adjustment',
+        quantity: Number(stockAdjustForm.newQuantity),
+        reason: stockAdjustForm.reason || undefined,
+      });
+      setShowStockAdjust(null);
+      load();
+    } catch (err: any) { alert(err.message); }
+    finally { setSaving(false); }
+  };
+
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -364,6 +391,13 @@ export default function Inventory() {
             title="Scan barcode to stock out"
           >
             <Barcode size={16} /> Scan to Stock Out
+          </button>
+          <button
+            onClick={() => { setBarcodeScanMode('adjust'); setShowBarcodeScanner(true); }}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition-colors shadow-sm"
+            title="Scan barcode to adjust stock"
+          >
+            <Barcode size={16} /> Scan to Adjust
           </button>
           <button onClick={() => setShowAddProduct(true)} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Add Product
@@ -472,6 +506,10 @@ export default function Inventory() {
                             <button onClick={() => { setShowStockOut(item); setStockOutForm({ quantity: '1', reason: 'Damaged', notes: '' }); }}
                               className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-xs font-semibold hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors" title="Stock Out">
                               <ArrowDown size={11} />
+                            </button>
+                            <button onClick={() => { setShowStockAdjust(item); setStockAdjustForm({ newQuantity: String(item.quantityInStock), reason: '', notes: '' }); }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors" title="Adjust Stock">
+                              <RotateCcw size={11} />
                             </button>
                             <button onClick={() => { setShowHistory(item); loadHistory(item); }}
                               className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors" title="History">
@@ -597,8 +635,8 @@ export default function Inventory() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
               <div>
                 <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Barcode size={17} className={barcodeScanMode === 'out' ? 'text-red-600' : 'text-emerald-600'} />
-                  {barcodeScanMode === 'out' ? 'Scan to Stock Out' : 'Scan to Stock In'}
+                  <Barcode size={17} className={barcodeScanMode === 'out' ? 'text-red-600' : barcodeScanMode === 'adjust' ? 'text-indigo-600' : 'text-emerald-600'} />
+                  {barcodeScanMode === 'out' ? 'Scan to Stock Out' : barcodeScanMode === 'adjust' ? 'Scan to Adjust Stock' : 'Scan to Stock In'}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   USB scanner, camera, or type SKU manually
@@ -630,7 +668,8 @@ export default function Inventory() {
                     'absolute left-3 top-1/2 -translate-y-1/2 transition-colors pointer-events-none',
                     barcodeFlash === 'success' ? 'text-emerald-500' :
                     barcodeFlash === 'error' ? 'text-red-500' :
-                    barcodeScanMode === 'out' ? 'text-red-400' : 'text-slate-400'
+                    barcodeScanMode === 'out' ? 'text-red-400' :
+                    barcodeScanMode === 'adjust' ? 'text-indigo-400' : 'text-slate-400'
                   )} />
                   <input
                     ref={barcodeInputRef}
@@ -653,7 +692,7 @@ export default function Inventory() {
                   />
                   {barcodeLoading && (
                     <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      <div className={clsx('w-4 h-4 border-2 border-t-transparent rounded-full animate-spin', barcodeScanMode === 'out' ? 'border-red-500' : 'border-emerald-500')} />
+                      <div className={clsx('w-4 h-4 border-2 border-t-transparent rounded-full animate-spin', barcodeScanMode === 'out' ? 'border-red-500' : barcodeScanMode === 'adjust' ? 'border-indigo-500' : 'border-emerald-500')} />
                     </div>
                   )}
                 </div>
@@ -696,16 +735,20 @@ export default function Inventory() {
                         ? 'opacity-50 cursor-not-allowed bg-slate-50 dark:bg-slate-700/50'
                         : barcodeScanMode === 'out'
                           ? 'hover:bg-red-50 dark:hover:bg-red-900/20'
-                          : 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                          : barcodeScanMode === 'adjust'
+                            ? 'hover:bg-indigo-50 dark:hover:bg-indigo-900/20'
+                            : 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
                     )}
                   >
                     <Camera size={22} className={
                       cameraSupported === false ? 'text-slate-400' :
-                      barcodeScanMode === 'out' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+                      barcodeScanMode === 'out' ? 'text-red-600 dark:text-red-400' :
+                      barcodeScanMode === 'adjust' ? 'text-indigo-600 dark:text-indigo-400' : 'text-emerald-600 dark:text-emerald-400'
                     } />
                     <span className={clsx('text-xs font-semibold',
                       cameraSupported === false ? 'text-slate-400' :
-                      barcodeScanMode === 'out' ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
+                      barcodeScanMode === 'out' ? 'text-red-700 dark:text-red-400' :
+                      barcodeScanMode === 'adjust' ? 'text-indigo-700 dark:text-indigo-400' : 'text-emerald-700 dark:text-emerald-400'
                     )}>
                       {cameraSupported === false ? 'Camera scan not supported in this browser' : 'Tap to scan with camera'}
                     </span>
@@ -891,6 +934,106 @@ export default function Inventory() {
               <div className="flex gap-3">
                 <button type="button" onClick={() => setShowStockOut(null)} className="flex-1 btn-secondary">Cancel</button>
                 <button type="submit" disabled={saving} className="flex-1 btn-primary bg-red-600 hover:bg-red-700">{saving ? 'Saving...' : 'Remove Stock'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Stock Adjust Drawer */}
+      {showStockAdjust && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowStockAdjust(null)} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-slate-100 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2"><RotateCcw size={16} className="text-indigo-600" /> Adjust Stock</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{showStockAdjust.productName} · currently {showStockAdjust.quantityInStock} on hand</p>
+              </div>
+              <button onClick={() => setShowStockAdjust(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button>
+            </div>
+            <form onSubmit={handleStockAdjust} className="p-5 space-y-4">
+              {/* Barcode scan input — scan a different product while drawer is open */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/40 px-3 py-2.5">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Barcode size={13} className="text-indigo-600 flex-shrink-0" />
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Scan a different product</span>
+                </div>
+                <div className="relative">
+                  <input
+                    ref={drawerAdjustBarcodeInputRef}
+                    type="text"
+                    placeholder="Scan barcode or type SKU + Enter…"
+                    className={clsx(
+                      'input py-1.5 text-xs font-mono dark:bg-slate-700 dark:border-slate-600 dark:text-white transition-all',
+                      barcodeFlash === 'success' && 'border-emerald-400 ring-1 ring-emerald-300',
+                      barcodeFlash === 'error' && 'border-red-400 ring-1 ring-red-300',
+                    )}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = (e.target as HTMLInputElement).value.trim();
+                        if (val) handleBarcodeInput(val, true, 'adjust');
+                      }
+                    }}
+                    autoComplete="off"
+                    disabled={barcodeLoading}
+                  />
+                  {barcodeLoading && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                      <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
+                {barcodeFlash === 'success' && barcodeMsg && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                    <CheckCircle size={11} /> {barcodeMsg}
+                  </p>
+                )}
+                {barcodeFlash === 'error' && barcodeMsg && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
+                    <AlertCircle size={11} /> {barcodeMsg}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">New Quantity (set stock to) *</label>
+                <input
+                  required
+                  type="number"
+                  min="0"
+                  value={stockAdjustForm.newQuantity}
+                  onChange={e => setStockAdjustForm(p => ({ ...p, newQuantity: e.target.value }))}
+                  className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                  placeholder="Enter the correct quantity"
+                />
+                {stockAdjustForm.newQuantity !== '' && (
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                    {Number(stockAdjustForm.newQuantity) > showStockAdjust.quantityInStock
+                      ? `+${Number(stockAdjustForm.newQuantity) - showStockAdjust.quantityInStock} from current`
+                      : Number(stockAdjustForm.newQuantity) < showStockAdjust.quantityInStock
+                        ? `−${showStockAdjust.quantityInStock - Number(stockAdjustForm.newQuantity)} from current`
+                        : 'No change from current'}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">Reason *</label>
+                <input
+                  required
+                  value={stockAdjustForm.reason}
+                  onChange={e => setStockAdjustForm(p => ({ ...p, reason: e.target.value }))}
+                  className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                  placeholder="e.g. Physical count, recount, reconciliation…"
+                />
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">Notes</label>
+                <textarea rows={2} value={stockAdjustForm.notes} onChange={e => setStockAdjustForm(p => ({ ...p, notes: e.target.value }))} className="input resize-none dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setShowStockAdjust(null)} className="flex-1 btn-secondary">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 btn-primary">{saving ? 'Saving...' : 'Set Stock Level'}</button>
               </div>
             </form>
           </div>
