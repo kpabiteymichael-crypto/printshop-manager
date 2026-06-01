@@ -1,14 +1,41 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
-import { sql } from 'drizzle-orm';
+import { sql, SQL } from 'drizzle-orm';
 
 const router = Router();
 router.use(authenticate);
 
-// GET /api/receipts — list all receipts
-router.get('/', authorize('owner', 'manager', 'cashier'), async (_req, res) => {
+// GET /api/receipts — list receipts with optional filters
+router.get('/', authorize('owner', 'manager', 'cashier'), async (req, res) => {
   try {
+    const { search, dateFrom, dateTo } = req.query as Record<string, string>;
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (dateFrom && !dateRegex.test(dateFrom)) {
+      return res.status(400).json({ error: 'Invalid dateFrom format. Use YYYY-MM-DD.' });
+    }
+    if (dateTo && !dateRegex.test(dateTo)) {
+      return res.status(400).json({ error: 'Invalid dateTo format. Use YYYY-MM-DD.' });
+    }
+
+    const conditions: SQL[] = [sql`1=1`];
+
+    if (search) {
+      const like = `%${search}%`;
+      conditions.push(sql`(r.receipt_number ILIKE ${like} OR c.name ILIKE ${like} OR u.name ILIKE ${like})`);
+    }
+
+    if (dateFrom) {
+      conditions.push(sql`r.generated_at >= ${dateFrom}::date`);
+    }
+
+    if (dateTo) {
+      conditions.push(sql`r.generated_at < (${dateTo}::date + interval '1 day')`);
+    }
+
+    const whereClause = sql.join(conditions, sql` AND `);
+
     const result = await db.execute(sql`
       SELECT
         r.id,
@@ -26,8 +53,9 @@ router.get('/', authorize('owner', 'manager', 'cashier'), async (_req, res) => {
       JOIN sales s ON s.id = r.sale_id
       LEFT JOIN customers c ON c.id = s.customer_id
       LEFT JOIN users u ON u.id = s.cashier_id
+      WHERE ${whereClause}
       ORDER BY r.generated_at DESC
-      LIMIT 200
+      LIMIT 500
     `);
     return res.json((result as any).rows ?? []);
   } catch (err) {

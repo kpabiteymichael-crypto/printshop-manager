@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { receiptsApi, pdfApi } from '../lib/api';
-import { Receipt, Search, MessageCircle, Printer, ArrowLeft, X, Download } from 'lucide-react';
-import clsx from 'clsx';
+import { Receipt, Search, MessageCircle, Printer, X, Download, Calendar, FileDown } from 'lucide-react';
 
 const fmt = (v: number) => `₵${Number(v).toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -21,6 +20,10 @@ function ReceiptDetail({ id, onClose }: { id: number; onClose: () => void }) {
   const handleDownloadPDF = () => {
     if (!receipt) return;
     pdfApi.download(pdfApi.receiptUrl(id), `receipt-${receipt.receipt_number}.pdf`);
+  };
+
+  const handlePrint = () => {
+    window.print();
   };
 
   const handleWhatsApp = () => {
@@ -56,15 +59,14 @@ function ReceiptDetail({ id, onClose }: { id: number; onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto border border-slate-100 dark:border-slate-700">
-        <div className="sticky top-0 bg-white dark:bg-slate-800 flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700 z-10">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm print-hide" onClick={onClose} />
+      <div className="print-receipt relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto border border-slate-100 dark:border-slate-700">
+        <div className="print-hide sticky top-0 bg-white dark:bg-slate-800 flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700 z-10">
           <h3 className="font-bold text-slate-900 dark:text-white">{receipt.receipt_number}</h3>
           <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={18} /></button>
         </div>
 
         <div className="p-5 receipt-content">
-          {/* Shop header */}
           <div className="text-center mb-5">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white">{receipt.shopName}</h2>
             {receipt.shopAddress && <p className="text-xs text-slate-500 dark:text-slate-400">{receipt.shopAddress}</p>}
@@ -80,7 +82,6 @@ function ReceiptDetail({ id, onClose }: { id: number; onClose: () => void }) {
             </div>
           </div>
 
-          {/* Items */}
           <div className="mb-4">
             <table className="w-full text-xs">
               <thead>
@@ -104,7 +105,6 @@ function ReceiptDetail({ id, onClose }: { id: number; onClose: () => void }) {
             </table>
           </div>
 
-          {/* Totals */}
           <div className="border-t border-dashed border-slate-200 dark:border-slate-600 pt-3 space-y-1 text-sm">
             <div className="flex justify-between text-slate-500 dark:text-slate-400">
               <span>Subtotal</span><span>{fmt(subtotal)}</span>
@@ -133,9 +133,8 @@ function ReceiptDetail({ id, onClose }: { id: number; onClose: () => void }) {
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="sticky bottom-0 bg-white dark:bg-slate-800 px-5 py-4 border-t border-slate-100 dark:border-slate-700 flex gap-2">
-          <button onClick={() => window.print()} className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-colors">
+        <div className="print-hide sticky bottom-0 bg-white dark:bg-slate-800 px-5 py-4 border-t border-slate-100 dark:border-slate-700 flex gap-2">
+          <button onClick={handlePrint} className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-colors">
             <Printer size={14} /> Print
           </button>
           <button onClick={handleDownloadPDF} className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold text-sm transition-colors">
@@ -150,44 +149,158 @@ function ReceiptDetail({ id, onClose }: { id: number; onClose: () => void }) {
   );
 }
 
+function exportCSV(receipts: any[]) {
+  const headers = ['Receipt #', 'Customer', 'Cashier', 'Date', 'Amount (GHS)', 'Payment Method'];
+  const rows = receipts.map(r => [
+    r.receipt_number,
+    r.customer_name || 'Walk-in',
+    r.cashier_name || '',
+    new Date(r.created_at).toLocaleDateString('en-GH'),
+    parseFloat(r.total_amount).toFixed(2),
+    PAYMENT_LABELS[r.payment_method] ?? r.payment_method,
+  ]);
+
+  const csv = [headers, ...rows]
+    .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `receipts-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function Receipts() {
   const [receipts, setReceipts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  useEffect(() => {
-    receiptsApi.list().then(setReceipts).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+  const fetchReceipts = useCallback(() => {
+    setLoading(true);
+    const params: Record<string, string> = {};
+    if (search) params.search = search;
+    if (dateFrom) params.dateFrom = dateFrom;
+    if (dateTo) params.dateTo = dateTo;
+    receiptsApi.list(Object.keys(params).length ? params : undefined)
+      .then(setReceipts)
+      .catch(() => setReceipts([]))
+      .finally(() => setLoading(false));
+  }, [search, dateFrom, dateTo]);
 
-  const filtered = receipts.filter(r =>
-    r.receipt_number?.toLowerCase().includes(search.toLowerCase()) ||
-    r.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
-    r.cashier_name?.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    const timer = setTimeout(fetchReceipts, search ? 400 : 0);
+    return () => clearTimeout(timer);
+  }, [fetchReceipts, search]);
+
+  const hasActiveFilters = search || dateFrom || dateTo;
+
+  const clearFilters = () => {
+    setSearch('');
+    setDateFrom('');
+    setDateTo('');
+  };
 
   return (
     <div className="space-y-6">
-      <style>{`@media print { .no-print { display: none !important; } body { background: white; } }`}</style>
+      <style>{`
+        @media print {
+          /* Hide everything except the open receipt modal */
+          body > * { display: none !important; }
+          /* Show the portal root that contains the modal */
+          #root { display: block !important; }
+          /* Hide sidebar, layout chrome, page content */
+          .no-print, nav, aside, header, footer { display: none !important; }
+          /* Hide modal backdrop overlay */
+          .fixed.inset-0.bg-slate-900\\/60 { display: none !important; }
+          /* Hide modal close button and action footer */
+          .print-hide { display: none !important; }
+          /* Make modal content fill the page */
+          .print-receipt {
+            position: static !important;
+            transform: none !important;
+            max-height: none !important;
+            overflow: visible !important;
+            box-shadow: none !important;
+            border: none !important;
+            border-radius: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+          body { background: white !important; margin: 0; padding: 0; }
+        }
+      `}</style>
+
       <div className="no-print">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
           <div>
-            <h1 className="page-title dark:text-white flex items-center gap-2"><Receipt size={24} className="text-indigo-600" /> Receipts</h1>
-            <p className="page-subtitle dark:text-slate-400">{receipts.length} receipts generated</p>
+            <h1 className="page-title dark:text-white flex items-center gap-2">
+              <Receipt size={24} className="text-indigo-600" /> Receipts
+            </h1>
+            <p className="page-subtitle dark:text-slate-400">
+              {loading ? 'Loading…' : `${receipts.length} receipt${receipts.length !== 1 ? 's' : ''} found`}
+            </p>
           </div>
+
+          <button
+            onClick={() => exportCSV(receipts)}
+            disabled={receipts.length === 0}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-semibold text-sm transition-colors"
+          >
+            <FileDown size={15} /> Export CSV
+          </button>
+        </div>
+
+        {/* Filters row */}
+        <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="relative">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search receipts..."
-              className="input pl-9 text-sm w-64 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
+              placeholder="Search receipts…"
+              className="input pl-9 text-sm w-56 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
             />
           </div>
+
+          <div className="flex items-center gap-2">
+            <Calendar size={15} className="text-slate-400 shrink-0" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              className="input text-sm dark:bg-slate-800 dark:border-slate-600 dark:text-white"
+              title="From date"
+            />
+            <span className="text-slate-400 text-sm">to</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              className="input text-sm dark:bg-slate-800 dark:border-slate-600 dark:text-white"
+              title="To date"
+            />
+          </div>
+
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-700 rounded-lg transition-colors"
+            >
+              <X size={13} /> Clear
+            </button>
+          )}
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center h-48"><div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" /></div>
+          <div className="flex items-center justify-center h-48">
+            <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          </div>
         ) : (
           <div className="card dark:bg-slate-800 dark:border-slate-700/50 overflow-hidden p-0">
             <div className="overflow-x-auto">
@@ -204,9 +317,13 @@ export default function Receipts() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-12 text-slate-400 dark:text-slate-500">No receipts found</td></tr>
-                  ) : filtered.map(r => (
+                  {receipts.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-slate-400 dark:text-slate-500">
+                        {hasActiveFilters ? 'No receipts match the current filters' : 'No receipts found'}
+                      </td>
+                    </tr>
+                  ) : receipts.map(r => (
                     <tr key={r.id} className="border-b border-slate-50 dark:border-slate-700/30 hover:bg-slate-50 dark:hover:bg-slate-700/20">
                       <td className="px-4 py-3">
                         <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400">{r.receipt_number}</span>
@@ -219,7 +336,10 @@ export default function Receipts() {
                       <td className="px-4 py-3 text-right font-bold text-slate-900 dark:text-white">{fmt(parseFloat(r.total_amount))}</td>
                       <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{PAYMENT_LABELS[r.payment_method] ?? r.payment_method}</td>
                       <td className="px-4 py-3">
-                        <button onClick={() => setSelectedId(r.id)} className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors">
+                        <button
+                          onClick={() => setSelectedId(r.id)}
+                          className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+                        >
                           View
                         </button>
                       </td>

@@ -185,7 +185,8 @@ export const analyticsApi = {
 
 // ─── Receipts ─────────────────────────────────────────────
 export const receiptsApi = {
-  list: () => api.get('/receipts').then(r => r.data),
+  list: (params?: { search?: string; dateFrom?: string; dateTo?: string }) =>
+    api.get('/receipts', { params }).then(r => r.data),
   get: (id: number) => api.get(`/receipts/${id}`).then(r => r.data),
 };
 
