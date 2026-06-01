@@ -44,12 +44,22 @@ export function createApp() {
     crossOriginEmbedderPolicy: false,
   }));
 
-  const allowedOrigins = process.env.ALLOWED_ORIGINS
+  const allowedOriginsEnv = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-    : true;
+    : [];
 
   app.use(cors({
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOriginsEnv.length === 0) return callback(null, true);
+      const isAllowed =
+        allowedOriginsEnv.includes(origin) ||
+        /^https:\/\/[\w-]+(\.vercel\.app)$/.test(origin) ||
+        /^https:\/\/[\w-]+-[\w-]+\.vercel\.app$/.test(origin) ||
+        origin === 'http://localhost:5000' ||
+        origin === 'http://localhost:3000';
+      callback(isAllowed ? null : new Error('Not allowed by CORS'), isAllowed);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
