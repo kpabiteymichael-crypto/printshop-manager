@@ -1,11 +1,20 @@
 import { useEffect, useState, useCallback } from 'react';
-import { printJobsApi, productsApi, customersApi } from '../lib/api';
+import { printJobsApi, productsApi, customersApi, pdfApi } from '../lib/api';
 import {
   Printer, Plus, Clock, CheckCircle, XCircle,
-  RefreshCw, LayoutGrid, List, Truck, ChevronRight, X, User,
+  RefreshCw, LayoutGrid, List, Truck, ChevronRight, X, User, FileText,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../context/AuthContext';
+
+// ─── Job Sheet Download ───────────────────────────────────────────────────────
+async function downloadJobSheet(job: any) {
+  try {
+    await pdfApi.download(pdfApi.printJobUrl(job.id), `job-sheet-${job.jobNumber}.pdf`);
+  } catch {
+    alert('Failed to generate job sheet PDF. Please try again.');
+  }
+}
 
 const STATUSES = [
   { key: 'pending',     label: 'Pending',     color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',       border: 'border-amber-300 dark:border-amber-700',    icon: <Clock size={13} /> },
@@ -72,6 +81,13 @@ function JobCard({ job, canUpdateStatus, canAssign, operators, onStatusChange, o
             className="text-[11px] py-1 px-1.5 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 transition-colors"
           >Cancel</button>
         )}
+        <button
+          onClick={() => downloadJobSheet(job)}
+          title="Download Job Sheet PDF"
+          className="flex items-center justify-center gap-1 text-[11px] py-1 px-1.5 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors border border-slate-200 dark:border-slate-600"
+        >
+          <FileText size={10} />
+        </button>
       </div>
       {canAssign && !['completed', 'cancelled'].includes(job.status) && (
         <select
@@ -241,6 +257,7 @@ export default function PrintJobs() {
                     <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
                   ))}
                   {canUpdateStatus && <th className="table-header px-4 py-3 text-left">Action</th>}
+                  <th className="table-header px-4 py-3 text-left">Sheet</th>
                 </tr>
               </thead>
               <tbody>
@@ -272,6 +289,15 @@ export default function PrintJobs() {
                           </select>
                         </td>
                       )}
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => downloadJobSheet(job)}
+                          title="Download Job Sheet PDF"
+                          className="flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 transition-colors"
+                        >
+                          <FileText size={11} /> PDF
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}

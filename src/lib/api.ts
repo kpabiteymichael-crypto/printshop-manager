@@ -221,6 +221,7 @@ export const pdfApi = {
   quotationUrl: (id: number) => `/api/pdf/quotation/${id}`,
   invoiceUrl: (id: number) => `/api/pdf/invoice/${id}`,
   purchaseOrderUrl: (id: number) => `/api/pdf/purchase-order/${id}`,
+  printJobUrl: (id: number) => `/api/pdf/print-job/${id}`,
   download: async (url: string, filename: string) => {
     const token = localStorage.getItem('ps_token');
     const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });

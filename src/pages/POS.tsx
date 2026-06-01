@@ -92,6 +92,26 @@ const CURRENCY = 'GH₵';
 const fmt = (n: number) =>
   n.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// ─── Print utility ───────────────────────────────────────────────────────────
+function escHtml(s: string | null | undefined): string {
+  if (!s) return '';
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function openPrintWindow(html: string) {
+  const win = window.open('', '_blank', 'width=420,height=700');
+  if (!win) return;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { win.print(); }, 350);
+}
+
 // ─── Receipt Overlay ─────────────────────────────────────────────────────────
 function ReceiptOverlay({
   data,
@@ -140,6 +160,94 @@ function ReceiptOverlay({
 
   const receiptUrl = `${window.location.origin}/receipt/${data.receiptNumber}`;
 
+  const handlePrint = () => {
+    const dateStr = new Date(data.createdAt).toLocaleDateString('en-GH', { day: '2-digit', month: 'short', year: 'numeric' });
+    const timeStr = new Date(data.createdAt).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' });
+
+    const itemsHtml = data.items.map(item => {
+      const lineTotal = item.quantity * item.unitPrice - item.discount;
+      return `
+        <div style="margin-bottom:6px;">
+          <div style="font-weight:600;">${escHtml(item.description)}</div>
+          <div style="display:flex;justify-content:space-between;padding-left:8px;color:#555;">
+            <span>${item.quantity} × GH₵${fmt(item.unitPrice)}${item.discount > 0 ? ` - GH₵${fmt(item.discount)}` : ''}</span>
+            <span style="font-weight:600;color:#111;">GH₵${fmt(lineTotal)}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    let paymentHtml = '';
+    if (isSplit) {
+      const linesHtml = (data.paymentLines ?? []).map(line => {
+        const label = PAYMENT_METHODS.find(m => m.value === line.method)?.label ?? line.method;
+        const lineChange = (line.method === 'cash' && line.amountTendered && line.amountTendered > line.amount)
+          ? line.amountTendered - line.amount : 0;
+        return `
+          <div style="margin-bottom:4px;">
+            <div style="display:flex;justify-content:space-between;"><span>${escHtml(label)}</span><span style="font-weight:600;">GH₵${fmt(line.amount)}</span></div>
+            ${line.reference ? `<div style="display:flex;justify-content:space-between;padding-left:10px;font-size:10px;color:#777;"><span>Ref:</span><span style="font-family:monospace;">${escHtml(line.reference)}</span></div>` : ''}
+            ${line.method === 'cash' && line.amountTendered ? `<div style="display:flex;justify-content:space-between;padding-left:10px;font-size:10px;color:#777;"><span>Tendered:</span><span>GH₵${fmt(line.amountTendered)}</span></div>` : ''}
+            ${lineChange > 0 ? `<div style="display:flex;justify-content:space-between;padding-left:10px;font-size:10px;font-weight:600;"><span>Change:</span><span>GH₵${fmt(lineChange)}</span></div>` : ''}
+          </div>`;
+      }).join('');
+      paymentHtml = `<div style="font-weight:600;margin-bottom:4px;">Split Payment</div>${linesHtml}
+        ${splitCashChange > 0 ? `<div style="display:flex;justify-content:space-between;border-top:1px dashed #ccc;padding-top:4px;font-weight:600;"><span>Total Change Due</span><span>GH₵${fmt(splitCashChange)}</span></div>` : ''}`;
+    } else {
+      paymentHtml = `
+        <div style="display:flex;justify-content:space-between;"><span>Payment</span><span style="font-weight:600;">${escHtml(methodLabel)}</span></div>
+        ${data.paymentReference ? `<div style="display:flex;justify-content:space-between;"><span>Reference</span><span style="font-family:monospace;">${escHtml(data.paymentReference)}</span></div>` : ''}
+        ${data.amountTendered && data.paymentMethod === 'cash' ? `
+          <div style="display:flex;justify-content:space-between;"><span>Tendered</span><span>GH₵${fmt(data.amountTendered)}</span></div>
+          <div style="display:flex;justify-content:space-between;font-weight:600;"><span>Change</span><span>GH₵${fmt(singleCashChange)}</span></div>` : ''}`;
+    }
+
+    const html = `<!DOCTYPE html><html><head>
+      <meta charset="utf-8"/>
+      <title>Receipt ${escHtml(data.receiptNumber)}</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Courier New', monospace; font-size: 12px; width: 80mm; margin: 0 auto; padding: 8mm 4mm; background: #fff; color: #000; }
+        .divider { border-top: 1px dashed #888; margin: 8px 0; }
+        .center { text-align: center; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+        .bold { font-weight: 700; }
+        .total-row { display: flex; justify-content: space-between; font-size: 14px; font-weight: 700; border-top: 1px solid #000; padding-top: 5px; margin-top: 3px; }
+        @media print { body { width: 80mm; } @page { margin: 0; size: 80mm auto; } }
+      </style>
+    </head><body>
+      <div class="center" style="margin-bottom:8px;">
+        <div class="bold" style="font-size:15px;letter-spacing:1px;">${escHtml(shopName)}</div>
+        <div style="color:#555;font-size:10px;margin-top:2px;">${escHtml(shopAddress)}</div>
+        <div class="divider"></div>
+        <div class="bold">RECEIPT</div>
+        <div>${escHtml(data.receiptNumber)}</div>
+      </div>
+      <div style="margin-bottom:6px;color:#555;">
+        <div class="row"><span>Date:</span><span>${escHtml(dateStr)}</span></div>
+        <div class="row"><span>Time:</span><span>${escHtml(timeStr)}</span></div>
+        <div class="row"><span>Cashier:</span><span>${escHtml(data.cashierName)}</span></div>
+        ${data.customerName ? `<div class="row"><span>Customer:</span><span>${escHtml(data.customerName)}</span></div>` : ''}
+      </div>
+      <div class="divider"></div>
+      <div style="margin-bottom:6px;">${itemsHtml}</div>
+      <div class="divider"></div>
+      <div style="margin-bottom:6px;color:#555;">
+        <div class="row"><span>Subtotal</span><span>GH₵${fmt(data.subtotal)}</span></div>
+        ${data.discountAmount > 0 ? `<div class="row" style="color:#2a7;"><span>Discount</span><span>-GH₵${fmt(data.discountAmount)}</span></div>` : ''}
+      </div>
+      <div class="total-row"><span>TOTAL</span><span>GH₵${fmt(data.total)}</span></div>
+      <div class="divider" style="margin-top:8px;"></div>
+      <div style="margin-bottom:6px;color:#555;">${paymentHtml}</div>
+      <div class="divider"></div>
+      <div class="center" style="margin-top:8px;color:#777;font-size:10px;">
+        <div>Scan QR to verify: ${escHtml(receiptUrl)}</div>
+        <div style="margin-top:6px;">Thank you for your business!</div>
+      </div>
+    </body></html>`;
+
+    openPrintWindow(html);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[90vh] border border-slate-100 dark:border-slate-700">
@@ -148,7 +256,7 @@ function ReceiptOverlay({
           <h3 className="font-bold text-slate-900 dark:text-white">Receipt</h3>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => window.print()}
+              onClick={handlePrint}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors"
             >
               <Printer size={13} /> Print

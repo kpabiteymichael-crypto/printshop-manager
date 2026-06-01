@@ -108,3 +108,27 @@
 .animate-slide-in {
   animation: slideIn 0.22s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
+
+/* ── Print styles ─────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide all app chrome */
+  nav, aside, header, footer,
+  [data-sidebar], [data-topbar], [data-bottomnav],
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Receipt / job-sheet pages opened in a dedicated print window
+     already contain only the content, so no extra hiding needed. */
+  @page {
+    margin: 10mm;
+    size: auto;
+  }
+}

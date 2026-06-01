@@ -342,6 +342,65 @@ router.get('/invoice/:id', authorize('owner', 'manager', 'cashier'), async (req,
   }
 });
 
+// GET /api/pdf/print-job/:id
+router.get('/print-job/:id', authorize('owner', 'manager', 'print_operator', 'cashier'), async (req, res) => {
+  try {
+    const result = await db.execute(sql`
+      SELECT pj.id, pj.job_number, pj.title, pj.description, pj.status,
+             pj.quantity, pj.unit_price, pj.total_amount, pj.notes,
+             pj.due_date, pj.created_at, pj.page_count, pj.payment_status,
+             c.name as customer_name, c.phone as customer_phone,
+             c.email as customer_email,
+             u.name as operator_name,
+             s.name as service_name
+      FROM print_jobs pj
+      LEFT JOIN customers c ON c.id = pj.customer_id
+      LEFT JOIN users u ON u.id = pj.assigned_to
+      LEFT JOIN services s ON s.id = pj.service_id
+      WHERE pj.id = ${Number(req.params.id)}
+    `);
+    const job = (result as any).rows?.[0];
+    if (!job) return res.status(404).json({ error: 'Print job not found' });
+
+    const settings = await getSettings();
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="job-sheet-${job.job_number}.pdf"`);
+    doc.pipe(res);
+
+    const notesLines: string[] = [];
+    if (job.service_name) notesLines.push(`Service: ${job.service_name}`);
+    if (job.page_count) notesLines.push(`Page count: ${job.page_count}`);
+    if (job.operator_name) notesLines.push(`Operator: ${job.operator_name}`);
+    if (job.description) notesLines.push(`\nDescription:\n${job.description}`);
+    if (job.notes) notesLines.push(`\nNotes:\n${job.notes}`);
+
+    buildPDF(doc, settings, {
+      docType: 'Job Sheet',
+      docNumber: job.job_number,
+      date: formatDate(job.created_at),
+      dueDate: job.due_date ? formatDate(job.due_date) : undefined,
+      customer: job.customer_name || 'Walk-in Customer',
+      customerPhone: job.customer_phone,
+      customerEmail: job.customer_email,
+      items: [{
+        description: job.title,
+        quantity: Number(job.quantity),
+        unitPrice: parseFloat(job.unit_price),
+        total: parseFloat(job.total_amount),
+      }],
+      totalAmount: parseFloat(job.total_amount),
+      notes: notesLines.join('\n') || undefined,
+      status: job.payment_status,
+    });
+
+    doc.end();
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to generate job sheet PDF' });
+  }
+});
+
 // GET /api/pdf/purchase-order/:id
 router.get('/purchase-order/:id', authorize('owner', 'manager', 'inventory_officer'), async (req, res) => {
   try {
