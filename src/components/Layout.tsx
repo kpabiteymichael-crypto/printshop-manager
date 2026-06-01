@@ -77,6 +77,15 @@ export default function Layout() {
   const [showLowStockBanner, setShowLowStockBanner] = useState(false);
   const [lowStockDismissed, setLowStockDismissed] = useState(false);
   const [securityEventCount, setSecurityEventCount] = useState(0);
+  const [shopLogo, setShopLogo] = useState<string | null>(null);
+  const [shopName, setShopName] = useState<string>('PrintShop');
+
+  useEffect(() => {
+    settingsApi.getPublic().then((s: any) => {
+      if (s.shop_logo) setShopLogo(s.shop_logo);
+      if (s.shop_name) setShopName(s.shop_name);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -163,12 +172,16 @@ export default function Layout() {
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className={clsx('flex items-center border-b border-slate-100 dark:border-slate-700/50', collapsed && !mobile ? 'px-3 py-4 justify-center' : 'px-4 py-4 gap-3')}>
-        <div className="w-9 h-9 bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-md shadow-indigo-200 dark:shadow-indigo-900/40 flex-shrink-0">
-          <Printer size={18} className="text-white" />
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-700 shadow-md shadow-indigo-200 dark:shadow-indigo-900/40">
+          {shopLogo ? (
+            <img src={shopLogo} alt="Shop logo" className="w-full h-full object-contain" />
+          ) : (
+            <Printer size={18} className="text-white" />
+          )}
         </div>
         {(!collapsed || mobile) && (
           <div>
-            <div className="font-bold text-slate-900 dark:text-white text-sm leading-tight">PrintShop</div>
+            <div className="font-bold text-slate-900 dark:text-white text-sm leading-tight">{shopName}</div>
             <div className="text-xs text-slate-500 dark:text-slate-400">Manager</div>
           </div>
         )}
@@ -330,6 +343,18 @@ export default function Layout() {
           >
             <Menu size={20} />
           </button>
+
+          {/* Mobile brand / logo */}
+          <div className="flex items-center gap-2 lg:hidden">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-700 shadow-sm">
+              {shopLogo ? (
+                <img src={shopLogo} alt="Shop logo" className="w-full h-full object-contain" />
+              ) : (
+                <Printer size={14} className="text-white" />
+              )}
+            </div>
+            <span className="font-bold text-slate-900 dark:text-white text-sm">{shopName}</span>
+          </div>
 
           {/* Page title area */}
           <div className="flex-1" />
