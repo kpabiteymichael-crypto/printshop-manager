@@ -250,6 +250,55 @@ router.get('/security-events/count', authorize('owner', 'manager'), async (_req,
   }
 });
 
+// GET /api/settings/security-events/histogram — daily counts for the past 30 days
+router.get('/security-events/histogram', authorize('owner', 'manager'), async (_req, res) => {
+  try {
+    const retentionRows = await db.select().from(settings).where(eq(settings.key, 'security_events_retention_days'));
+    const retentionVal = retentionRows[0]?.value ?? 'forever';
+
+    let windowDays = 30;
+    if (retentionVal !== 'forever') {
+      const retDays = Number(retentionVal);
+      if (Number.isFinite(retDays) && retDays > 0) {
+        windowDays = Math.min(30, retDays);
+      }
+    }
+
+    const result = await db.execute(sql`
+      SELECT
+        DATE(created_at AT TIME ZONE 'UTC') AS day,
+        COUNT(*) AS cnt
+      FROM audit_logs
+      WHERE action = 'unauthorized_access'
+        AND created_at >= NOW() - (${windowDays} * INTERVAL '1 day')
+      GROUP BY day
+      ORDER BY day ASC
+    `);
+
+    const countsByDay: Record<string, number> = {};
+    for (const row of (result as any).rows) {
+      const day = row.day instanceof Date
+        ? row.day.toISOString().slice(0, 10)
+        : String(row.day).slice(0, 10);
+      countsByDay[day] = Number(row.cnt);
+    }
+
+    const histogram: { date: string; count: number }[] = [];
+    for (let i = windowDays - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setUTCHours(0, 0, 0, 0);
+      d.setUTCDate(d.getUTCDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      histogram.push({ date: dateStr, count: countsByDay[dateStr] ?? 0 });
+    }
+
+    return res.json(histogram);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch security events histogram' });
+  }
+});
+
 // DELETE /api/settings/security-events — clear unauthorized_access audit log entries (owner only)
 // Query params: olderThanDays=N  → delete entries older than N days; omit or 0 → delete all
 router.delete('/security-events', authorize('owner'), async (req, res) => {

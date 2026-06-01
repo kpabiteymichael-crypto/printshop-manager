@@ -5,6 +5,7 @@ import api from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { UserCog, Plus, Shield, CheckCircle, XCircle, Activity, RefreshCw, ShieldAlert, Key, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 const ROLES = [
   { value: 'owner', label: 'Owner', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
@@ -168,6 +169,11 @@ const RETENTION_LABELS: Record<string, string> = {
   'forever': 'Keep forever',
 };
 
+interface HistogramEntry {
+  date: string;
+  count: number;
+}
+
 function SecurityEvents() {
   const { user } = useAuth();
   const isOwner = user?.role === 'owner';
@@ -176,6 +182,13 @@ function SecurityEvents() {
   const [clearing, setClearing] = useState(false);
   const [confirmDays, setConfirmDays] = useState<number | null>(null);
   const [retentionPolicy, setRetentionPolicy] = useState<string>('forever');
+  const [histogram, setHistogram] = useState<HistogramEntry[]>([]);
+
+  const loadHistogram = () => {
+    settingsApi.securityEventsHistogram()
+      .then(setHistogram)
+      .catch(() => setHistogram([]));
+  };
 
   const load = () => {
     setLoading(true);
@@ -183,6 +196,7 @@ function SecurityEvents() {
       .then(setEvents)
       .catch(() => setEvents([]))
       .finally(() => setLoading(false));
+    loadHistogram();
   };
 
   useEffect(() => {
@@ -290,6 +304,52 @@ function SecurityEvents() {
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
         Unauthorized API access attempts (403 Forbidden) recorded in the last 100 events.
       </p>
+      {histogram.length > 0 && histogram.some(h => h.count > 0) && (
+        <div className="mb-5">
+          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">
+            Events per day (last {histogram.length} days)
+          </p>
+          <ResponsiveContainer width="100%" height={110}>
+            <BarChart data={histogram} margin={{ top: 4, right: 4, left: -28, bottom: 0 }} barCategoryGap="20%">
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />
+              <XAxis
+                dataKey="date"
+                tickFormatter={(v: string) => {
+                  const d = new Date(v + 'T00:00:00Z');
+                  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+                }}
+                tick={{ fontSize: 10, fill: 'rgb(148 163 184)' }}
+                axisLine={false}
+                tickLine={false}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fontSize: 10, fill: 'rgb(148 163 184)' }}
+                axisLine={false}
+                tickLine={false}
+                width={36}
+              />
+              <Tooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const d = new Date(label + 'T00:00:00Z');
+                  const dateLabel = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+                  return (
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 shadow-lg text-xs">
+                      <div className="font-semibold text-slate-700 dark:text-slate-200 mb-0.5">{dateLabel}</div>
+                      <div className="text-red-600 dark:text-red-400">
+                        {payload[0].value} unauthorized {payload[0].value === 1 ? 'attempt' : 'attempts'}
+                      </div>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="count" fill="rgb(239 68 68)" radius={[3, 3, 0, 0]} maxBarSize={20} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
       {loading ? (
         <div className="flex items-center justify-center h-32">
           <div className="w-6 h-6 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
