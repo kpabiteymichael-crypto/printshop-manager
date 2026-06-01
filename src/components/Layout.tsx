@@ -234,7 +234,7 @@ export default function Layout() {
     <div className="flex h-screen bg-slate-50 dark:bg-slate-900 overflow-hidden transition-colors duration-200">
       {/* Desktop Sidebar */}
       <aside className={clsx(
-        'hidden lg:flex flex-col bg-white dark:bg-slate-850 border-r border-slate-100 dark:border-slate-700/50 shadow-sm flex-shrink-0 transition-all duration-200',
+        'hidden lg:flex flex-col bg-white dark:bg-slate-850 border-r border-slate-100 dark:border-slate-700/50 shadow-sm flex-shrink-0 transition-all duration-200 overflow-hidden',
         collapsed ? 'w-16' : 'w-60'
       )} style={{ backgroundColor: isDark ? '#1a2035' : undefined }}>
         <SidebarContent />
@@ -371,6 +371,7 @@ export default function Layout() {
           <button
             onClick={() => { openProfile(); setShowNotifs(false); }}
             className="flex items-center gap-2 hover:opacity-80 transition-opacity ml-1"
+            title="Edit profile"
           >
             <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
               {user?.name?.charAt(0).toUpperCase()}
@@ -379,6 +380,16 @@ export default function Layout() {
               <div className="text-sm font-semibold text-slate-900 dark:text-white leading-tight">{user?.name}</div>
               <div className="text-xs text-slate-400 dark:text-slate-500">{user?.role ? ROLE_LABELS[user.role] : ''}</div>
             </div>
+          </button>
+
+          {/* Logout */}
+          <button
+            onClick={handleLogout}
+            title="Sign Out"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-500 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-colors ml-1"
+          >
+            <LogOut size={17} />
+            <span className="hidden sm:inline">Sign Out</span>
           </button>
         </header>
 
