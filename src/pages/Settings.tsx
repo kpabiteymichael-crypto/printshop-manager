@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { settingsApi } from '../lib/api';
-import { Settings as SettingsIcon, Save, CheckCircle, Star } from 'lucide-react';
+import { Settings as SettingsIcon, Save, CheckCircle, Star, Upload, X, Link } from 'lucide-react';
 
 export default function Settings() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [logoMode, setLogoMode] = useState<'upload' | 'url'>('upload');
+  const [logoUploading, setLogoUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { settingsApi.get().then(setSettings).finally(() => setLoading(false)); }, []);
 
@@ -22,6 +25,38 @@ export default function Settings() {
   };
 
   const set = (key: string, value: string) => setSettings(p => ({ ...p, [key]: value }));
+
+  const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const MAX_SIZE = 5 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      alert('Logo file must be 5 MB or smaller.');
+      e.target.value = '';
+      return;
+    }
+
+    const allowed = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      alert('Only PNG, JPG, SVG, or WebP files are supported.');
+      e.target.value = '';
+      return;
+    }
+
+    setLogoUploading(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      set('shop_logo', dataUrl);
+      setLogoUploading(false);
+    };
+    reader.onerror = () => {
+      alert('Failed to read file. Please try again.');
+      setLogoUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center h-48"><div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" /></div>
@@ -63,13 +98,83 @@ export default function Settings() {
               </div>
             </div>
             <div>
-              <label className="label dark:text-slate-300">Logo URL</label>
-              <input value={settings.shop_logo ?? ''} onChange={e => set('shop_logo', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="https://example.com/logo.png" />
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Paste a URL to your shop logo — it will appear on printed receipts and job sheets.</p>
+              <div className="flex items-center justify-between mb-1">
+                <label className="label dark:text-slate-300 mb-0">Shop Logo</label>
+                <div className="flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setLogoMode('upload')}
+                    className={`flex items-center gap-1 px-2.5 py-1 transition-colors ${logoMode === 'upload' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'}`}
+                  >
+                    <Upload size={11} /> Upload
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLogoMode('url')}
+                    className={`flex items-center gap-1 px-2.5 py-1 transition-colors ${logoMode === 'url' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'}`}
+                  >
+                    <Link size={11} /> URL
+                  </button>
+                </div>
+              </div>
+
+              {logoMode === 'upload' ? (
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                    className="hidden"
+                    onChange={handleLogoFileChange}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={logoUploading}
+                    className="flex items-center gap-2 px-4 py-2 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:border-indigo-400 dark:hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors disabled:opacity-50"
+                  >
+                    {logoUploading ? (
+                      <><div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" /> Reading file…</>
+                    ) : (
+                      <><Upload size={15} /> Choose file (PNG, JPG, SVG, WebP — max 5 MB)</>
+                    )}
+                  </button>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Appears on printed receipts, job sheets, and PDFs.</p>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    value={settings.shop_logo?.startsWith('data:') ? '' : (settings.shop_logo ?? '')}
+                    onChange={e => set('shop_logo', e.target.value)}
+                    className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                    placeholder="https://example.com/logo.png"
+                  />
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Paste a publicly accessible URL to your logo.</p>
+                </div>
+              )}
+
               {settings.shop_logo && (
-                <div className="mt-2 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg inline-flex items-center gap-3">
-                  <img src={settings.shop_logo} alt="Logo preview" className="h-12 w-auto max-w-[120px] object-contain rounded" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Preview</span>
+                <div className="mt-3 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl flex items-center gap-3">
+                  <img
+                    src={settings.shop_logo}
+                    alt="Logo preview"
+                    className="h-14 w-auto max-w-[140px] object-contain rounded"
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">Preview</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                      {settings.shop_logo.startsWith('data:') ? 'Uploaded file (stored as data URL)' : settings.shop_logo}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { set('shop_logo', ''); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                    className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    title="Remove logo"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
               )}
             </div>
