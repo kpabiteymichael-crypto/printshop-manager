@@ -243,6 +243,7 @@ export const pdfApi = {
 // ─── Settings ─────────────────────────────────────────────
 export const settingsApi = {
   get: () => api.get('/settings').then(r => r.data),
+  getPublic: () => api.get('/settings/public').then(r => r.data),
   update: (data: Record<string, string>) => api.put('/settings', data).then(r => r.data),
   getStaff: () => api.get('/settings/staff').then(r => r.data),
   createStaff: (data: object) => api.post('/settings/staff', data).then(r => r.data),

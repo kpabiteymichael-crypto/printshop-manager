@@ -62,6 +62,17 @@ export default function Settings() {
                 <input type="email" value={settings.shop_email ?? ''} onChange={e => set('shop_email', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="info@printshop.ph" />
               </div>
             </div>
+            <div>
+              <label className="label dark:text-slate-300">Logo URL</label>
+              <input value={settings.shop_logo ?? ''} onChange={e => set('shop_logo', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="https://example.com/logo.png" />
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Paste a URL to your shop logo — it will appear on printed receipts and job sheets.</p>
+              {settings.shop_logo && (
+                <div className="mt-2 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg inline-flex items-center gap-3">
+                  <img src={settings.shop_logo} alt="Logo preview" className="h-12 w-auto max-w-[120px] object-contain rounded" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Preview</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

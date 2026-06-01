@@ -18,6 +18,16 @@ router.get('/', authorize('owner', 'manager'), async (_req, res) => {
   } catch { return res.status(500).json({ error: 'Failed to fetch settings' }); }
 });
 
+const PUBLIC_SETTING_KEYS = ['shop_name', 'shop_address', 'shop_phone', 'shop_email', 'shop_logo'];
+router.get('/public', async (_req, res) => {
+  try {
+    const rows = await db.select().from(settings);
+    const obj: Record<string, string> = {};
+    rows.filter(r => PUBLIC_SETTING_KEYS.includes(r.key)).forEach(r => { obj[r.key] = r.value; });
+    return res.json(obj);
+  } catch { return res.status(500).json({ error: 'Failed to fetch public settings' }); }
+});
+
 router.put('/', authorize('owner'), async (req, res) => {
   try {
     const updates = req.body as Record<string, string>;

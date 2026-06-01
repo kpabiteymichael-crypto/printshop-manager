@@ -14,6 +14,23 @@ async function getSettings(): Promise<Record<string, string>> {
   return settings;
 }
 
+async function fetchLogoBuffer(url: string): Promise<Buffer | null> {
+  if (!url) return null;
+  try {
+    if (url.startsWith('data:')) {
+      const b64 = url.split(',')[1];
+      if (!b64) return null;
+      return Buffer.from(b64, 'base64');
+    }
+    const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return null;
+    const ab = await response.arrayBuffer();
+    return Buffer.from(ab);
+  } catch {
+    return null;
+  }
+}
+
 function formatAmount(v: number) {
   return `GHS ${v.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -39,7 +56,7 @@ function buildPDF(doc: PDFKit.PDFDocument, settings: Record<string, string>, opt
   status?: string;
   createdBy?: string;
   paymentMethod?: string;
-}) {
+}, logoBuffer?: Buffer | null) {
   const shopName = settings.shop_name || 'PrintShop Manager';
   const shopAddress = settings.shop_address || '';
   const shopPhone = settings.shop_phone || '';
@@ -52,14 +69,23 @@ function buildPDF(doc: PDFKit.PDFDocument, settings: Record<string, string>, opt
   // Header background
   doc.rect(0, 0, pageWidth, 120).fill('#4f46e5');
 
+  // Logo (if available)
+  let textStartX = margin;
+  if (logoBuffer) {
+    try {
+      doc.image(logoBuffer, margin, 15, { fit: [72, 72] });
+      textStartX = margin + 80;
+    } catch { /* logo rendering failed, ignore */ }
+  }
+
   // Shop name
   doc.fillColor('white').fontSize(22).font('Helvetica-Bold')
-    .text(shopName, margin, 25, { width: contentWidth * 0.6 });
+    .text(shopName, textStartX, 25, { width: contentWidth * 0.6 - (textStartX - margin) });
 
   doc.fontSize(9).font('Helvetica').fillColor('#c7d2fe');
-  if (shopAddress) doc.text(shopAddress, margin, 52);
-  if (shopPhone) doc.text(`Tel: ${shopPhone}`, margin, shopAddress ? 64 : 52);
-  if (shopEmail) doc.text(shopEmail, margin, (shopAddress && shopPhone) ? 76 : shopAddress || shopPhone ? 64 : 52);
+  if (shopAddress) doc.text(shopAddress, textStartX, 52);
+  if (shopPhone) doc.text(`Tel: ${shopPhone}`, textStartX, shopAddress ? 64 : 52);
+  if (shopEmail) doc.text(shopEmail, textStartX, (shopAddress && shopPhone) ? 76 : shopAddress || shopPhone ? 64 : 52);
 
   // Doc type + number (right side of header)
   doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
@@ -205,6 +231,7 @@ router.get('/receipt/:id', authorize('owner', 'manager', 'cashier'), async (req,
     `);
     const items = (itemsResult as any).rows ?? [];
     const settings = await getSettings();
+    const logoBuffer = settings.shop_logo ? await fetchLogoBuffer(settings.shop_logo) : null;
 
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
     res.setHeader('Content-Type', 'application/pdf');
@@ -229,7 +256,7 @@ router.get('/receipt/:id', authorize('owner', 'manager', 'cashier'), async (req,
       notes: receipt.notes,
       paymentMethod: receipt.payment_method,
       createdBy: receipt.cashier_name,
-    });
+    }, logoBuffer);
 
     doc.end();
   } catch (err) {
@@ -256,6 +283,7 @@ router.get('/quotation/:id', authorize('owner', 'manager', 'cashier'), async (re
     const itemsResult = await db.execute(sql`SELECT description, quantity, unit_price, total FROM quotation_items WHERE quotation_id = ${Number(req.params.id)}`);
     const items = (itemsResult as any).rows ?? [];
     const settings = await getSettings();
+    const logoBuffer = settings.shop_logo ? await fetchLogoBuffer(settings.shop_logo) : null;
 
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
     res.setHeader('Content-Type', 'application/pdf');
@@ -281,7 +309,7 @@ router.get('/quotation/:id', authorize('owner', 'manager', 'cashier'), async (re
       notes: qt.notes,
       status: qt.status,
       createdBy: qt.created_by_name,
-    });
+    }, logoBuffer);
 
     doc.end();
   } catch (err) {
@@ -308,6 +336,7 @@ router.get('/invoice/:id', authorize('owner', 'manager', 'cashier'), async (req,
     const itemsResult = await db.execute(sql`SELECT description, quantity, unit_price, total FROM invoice_items WHERE invoice_id = ${Number(req.params.id)}`);
     const items = (itemsResult as any).rows ?? [];
     const settings = await getSettings();
+    const logoBuffer = settings.shop_logo ? await fetchLogoBuffer(settings.shop_logo) : null;
 
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
     res.setHeader('Content-Type', 'application/pdf');
@@ -333,7 +362,7 @@ router.get('/invoice/:id', authorize('owner', 'manager', 'cashier'), async (req,
       notes: inv.notes,
       status: inv.payment_status,
       createdBy: inv.created_by_name,
-    });
+    }, logoBuffer);
 
     doc.end();
   } catch (err) {
@@ -363,6 +392,7 @@ router.get('/print-job/:id', authorize('owner', 'manager', 'print_operator', 'ca
     if (!job) return res.status(404).json({ error: 'Print job not found' });
 
     const settings = await getSettings();
+    const logoBuffer = settings.shop_logo ? await fetchLogoBuffer(settings.shop_logo) : null;
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="job-sheet-${job.job_number}.pdf"`);
@@ -392,7 +422,7 @@ router.get('/print-job/:id', authorize('owner', 'manager', 'print_operator', 'ca
       totalAmount: parseFloat(job.total_amount),
       notes: notesLines.join('\n') || undefined,
       status: job.payment_status,
-    });
+    }, logoBuffer);
 
     doc.end();
   } catch (err) {

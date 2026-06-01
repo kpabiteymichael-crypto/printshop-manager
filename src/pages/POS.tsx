@@ -118,6 +118,9 @@ function ReceiptOverlay({
   data,
   shopName,
   shopAddress,
+  shopPhone,
+  shopEmail,
+  shopLogo,
   onClose,
   isReprint = false,
 }: {
@@ -138,6 +141,9 @@ function ReceiptOverlay({
   };
   shopName: string;
   shopAddress: string;
+  shopPhone?: string;
+  shopEmail?: string;
+  shopLogo?: string;
   onClose: () => void;
   isReprint?: boolean;
 }) {
@@ -219,8 +225,11 @@ function ReceiptOverlay({
       </style>
     </head><body>
       <div class="center" style="margin-bottom:8px;">
+        ${shopLogo ? `<img src="${escHtml(shopLogo)}" alt="${escHtml(shopName)}" style="max-width:72px;max-height:56px;margin:0 auto 6px;display:block;object-fit:contain;" />` : ''}
         <div class="bold" style="font-size:15px;letter-spacing:1px;">${escHtml(shopName)}</div>
-        <div style="color:#555;font-size:10px;margin-top:2px;">${escHtml(shopAddress)}</div>
+        ${shopAddress ? `<div style="color:#555;font-size:10px;margin-top:2px;">${escHtml(shopAddress)}</div>` : ''}
+        ${shopPhone ? `<div style="color:#555;font-size:10px;">${escHtml(shopPhone)}</div>` : ''}
+        ${shopEmail ? `<div style="color:#555;font-size:10px;">${escHtml(shopEmail)}</div>` : ''}
         <div class="divider"></div>
         <div class="bold">RECEIPT</div>
         <div>${escHtml(data.receiptNumber)}</div>
@@ -275,8 +284,13 @@ function ReceiptOverlay({
           <div className="p-5 font-mono text-xs space-y-3 print:text-black print:bg-white" id="receipt-content">
             {/* Header */}
             <div className="text-center space-y-1">
+              {shopLogo && (
+                <img src={shopLogo} alt={shopName} className="h-12 w-auto max-w-[80px] object-contain mx-auto mb-1" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              )}
               <div className="text-base font-bold text-slate-900 dark:text-white tracking-wide">{shopName}</div>
-              <div className="text-slate-500 dark:text-slate-400 text-[11px] leading-tight">{shopAddress}</div>
+              {shopAddress && <div className="text-slate-500 dark:text-slate-400 text-[11px] leading-tight">{shopAddress}</div>}
+              {shopPhone && <div className="text-slate-500 dark:text-slate-400 text-[11px]">{shopPhone}</div>}
+              {shopEmail && <div className="text-slate-500 dark:text-slate-400 text-[11px]">{shopEmail}</div>}
               <div className="border-t border-dashed border-slate-300 dark:border-slate-600 my-2" />
               <div className="text-slate-700 dark:text-slate-300 font-semibold">RECEIPT</div>
               <div className="text-slate-600 dark:text-slate-400">{data.receiptNumber}</div>
@@ -1318,6 +1332,9 @@ export default function POS() {
   const [session, setSession] = useState<any>(null);
   const [shopName, setShopName] = useState('PrintShop Manager');
   const [shopAddress, setShopAddress] = useState('');
+  const [shopPhone, setShopPhone] = useState('');
+  const [shopEmail, setShopEmail] = useState('');
+  const [shopLogo, setShopLogo] = useState('');
   const [loading, setLoading] = useState(true);
 
   // Browser state
@@ -1358,14 +1375,19 @@ export default function POS() {
       posApi.products(),
       posApi.services(),
       cashApi.currentSession().catch(() => null),
-      settingsApi.get(),
-    ]).then(([prods, svcs, sess, sett]) => {
+      settingsApi.get().catch(() => null),
+      settingsApi.getPublic().catch(() => null),
+    ]).then(([prods, svcs, sess, sett, pub]) => {
       setProducts(prods);
       setServices(svcs);
       setSession(sess);
+      const combined = { ...pub, ...sett };
+      if (combined.shop_name) setShopName(combined.shop_name);
+      if (combined.shop_address) setShopAddress(combined.shop_address);
+      if (combined.shop_phone) setShopPhone(combined.shop_phone);
+      if (combined.shop_email) setShopEmail(combined.shop_email);
+      if (combined.shop_logo) setShopLogo(combined.shop_logo);
       if (sett) {
-        if (sett.shop_name) setShopName(sett.shop_name);
-        if (sett.shop_address) setShopAddress(sett.shop_address);
         setLoyaltySettings({
           enabled: (sett.loyalty_enabled ?? 'true') !== 'false',
           earnRate: parseFloat(sett.loyalty_earn_rate ?? '1'),
@@ -1652,6 +1674,9 @@ export default function POS() {
           data={receipt}
           shopName={shopName}
           shopAddress={shopAddress}
+          shopPhone={shopPhone}
+          shopEmail={shopEmail}
+          shopLogo={shopLogo}
           isReprint={isReprintReceipt}
           onClose={() => { setReceipt(null); setIsReprintReceipt(false); }}
         />
