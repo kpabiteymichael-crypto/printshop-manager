@@ -32,26 +32,83 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
   }
 }
 
+const URL_PREFIX_MODULE_MAP: Array<[string, string]> = [
+  ['/api/suppliers/purchase-orders', 'purchase-orders'],
+  ['/api/pos/sales', 'sales'],
+  ['/api/settings/staff', 'staff'],
+  ['/api/products', 'bookstore'],
+];
+
+export const ALLOWED_OVERRIDE_MODULES = [
+  'dashboard', 'pos', 'print-jobs', 'inventory', 'bookstore',
+  'customers', 'suppliers', 'purchase-orders', 'cash', 'expenses',
+  'debts', 'sales', 'receipts', 'quotations', 'invoices', 'reports',
+] as const;
+
+function extractModule(req: AuthRequest): string | null {
+  const url = req.originalUrl || '';
+  for (const [prefix, module] of URL_PREFIX_MODULE_MAP) {
+    if (url.startsWith(prefix)) return module;
+  }
+  const match = url.match(/^\/api\/([^/?]+)/);
+  return match ? match[1] : null;
+}
+
+async function hasActiveOverride(userId: number, module: string): Promise<boolean> {
+  try {
+    const result = await db.execute(sql`
+      SELECT id FROM permission_overrides
+      WHERE user_id = ${userId}
+        AND module = ${module}
+        AND is_revoked = false
+        AND expires_at > NOW()
+      LIMIT 1
+    `);
+    return (result as any).rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function denyWithAudit(req: AuthRequest, res: Response, roles: string[]) {
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
+    ?? req.socket?.remoteAddress
+    ?? null;
+  const details = JSON.stringify({
+    method: req.method,
+    route: req.originalUrl,
+    userRole: req.user!.role,
+    requiredRoles: roles,
+  });
+  db.execute(sql`
+    INSERT INTO audit_logs (user_id, action, entity_type, entity_id, new_values, ip_address, created_at)
+    VALUES (${req.user!.id}, 'unauthorized_access', ${req.path}, NULL, ${details}, ${ip}, NOW())
+  `).catch(() => {});
+  return res.status(403).json({ error: 'Forbidden' });
+}
+
 export function authorize(...roles: string[]) {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+
+    if (roles.includes(req.user.role)) {
+      return next();
+    }
+
+    const module = extractModule(req);
+    if (module && await hasActiveOverride(req.user.id, module)) {
+      return next();
+    }
+
+    return denyWithAudit(req, res, roles);
+  };
+}
+
+export function strictAuthorize(...roles: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ error: 'Authentication required' });
-    if (!roles.includes(req.user.role)) {
-      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
-        ?? req.socket?.remoteAddress
-        ?? null;
-      const details = JSON.stringify({
-        method: req.method,
-        route: req.originalUrl,
-        userRole: req.user.role,
-        requiredRoles: roles,
-      });
-      db.execute(sql`
-        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, new_values, ip_address, created_at)
-        VALUES (${req.user.id}, 'unauthorized_access', ${req.path}, NULL, ${details}, ${ip}, NOW())
-      `).catch(() => {});
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    next();
+    if (roles.includes(req.user.role)) return next();
+    return denyWithAudit(req, res, roles);
   };
 }
 

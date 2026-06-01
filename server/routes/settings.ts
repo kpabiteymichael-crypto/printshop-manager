@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/index';
 import { settings, users } from '../db/schema';
 import { eq, sql } from 'drizzle-orm';
-import { authenticate, authorize, AuthRequest } from '../middleware/auth';
+import { authenticate, authorize, strictAuthorize, AuthRequest, ALLOWED_OVERRIDE_MODULES } from '../middleware/auth';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 
@@ -223,6 +223,99 @@ router.get('/security-events/count', authorize('owner', 'manager'), async (_req,
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Failed to count security events' });
+  }
+});
+
+// ─── Permission Overrides ─────────────────────────────────
+
+// GET /api/settings/permission-overrides — list all overrides (owner only, no override bypass)
+router.get('/permission-overrides', strictAuthorize('owner'), async (_req, res) => {
+  try {
+    const result = await db.execute(sql`
+      SELECT
+        po.id, po.user_id, po.module, po.granted_by, po.expires_at,
+        po.reason, po.is_revoked, po.created_at,
+        u.name AS user_name, u.email AS user_email, u.role AS user_role,
+        g.name AS granted_by_name
+      FROM permission_overrides po
+      JOIN users u ON u.id = po.user_id
+      JOIN users g ON g.id = po.granted_by
+      ORDER BY po.created_at DESC
+    `);
+    const rows = (result as any).rows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      module: r.module,
+      grantedBy: r.granted_by,
+      expiresAt: r.expires_at,
+      reason: r.reason,
+      isRevoked: r.is_revoked,
+      createdAt: r.created_at,
+      userName: r.user_name,
+      userEmail: r.user_email,
+      userRole: r.user_role,
+      grantedByName: r.granted_by_name,
+    }));
+    return res.json(rows);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch permission overrides' });
+  }
+});
+
+// POST /api/settings/permission-overrides — grant an override (owner only, no override bypass)
+router.post('/permission-overrides', strictAuthorize('owner'), async (req: AuthRequest, res) => {
+  try {
+    const data = z.object({
+      userId: z.number().int().positive(),
+      module: z.enum(ALLOWED_OVERRIDE_MODULES),
+      expiresAt: z.string(),
+      reason: z.string().max(500).optional(),
+    }).parse(req.body);
+
+    const expiresAt = new Date(data.expiresAt);
+    if (isNaN(expiresAt.getTime()) || expiresAt <= new Date()) {
+      return res.status(400).json({ error: 'expiresAt must be a valid future date' });
+    }
+
+    const grantedBy = req.user!.id;
+
+    const result = await db.execute(sql`
+      INSERT INTO permission_overrides (user_id, module, granted_by, expires_at, reason)
+      VALUES (${data.userId}, ${data.module}, ${grantedBy}, ${expiresAt}, ${data.reason ?? null})
+      RETURNING id, user_id, module, granted_by, expires_at, reason, is_revoked, created_at
+    `);
+    const row = (result as any).rows[0];
+    return res.status(201).json({
+      id: row.id,
+      userId: row.user_id,
+      module: row.module,
+      grantedBy: row.granted_by,
+      expiresAt: row.expires_at,
+      reason: row.reason,
+      isRevoked: row.is_revoked,
+      createdAt: row.created_at,
+    });
+  } catch (err: any) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to create permission override' });
+  }
+});
+
+// DELETE /api/settings/permission-overrides/:id — revoke an override (owner only, no override bypass)
+router.delete('/permission-overrides/:id', strictAuthorize('owner'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+
+    await db.execute(sql`
+      UPDATE permission_overrides SET is_revoked = true WHERE id = ${id}
+    `);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to revoke permission override' });
   }
 });
 

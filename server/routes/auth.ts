@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { db } from '../db/index';
 import { users } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { generateToken, authenticate, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
 
@@ -82,6 +82,22 @@ router.put('/profile', authenticate, async (req: AuthRequest, res) => {
   } catch (err: any) {
     if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
     return res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// GET /api/auth/my-overrides — active permission overrides for the current user
+router.get('/my-overrides', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const result = await db.execute(sql`
+      SELECT module FROM permission_overrides
+      WHERE user_id = ${req.user!.id}
+        AND is_revoked = false
+        AND expires_at > NOW()
+    `);
+    const modules = (result as any).rows.map((r: any) => r.module as string);
+    return res.json({ modules });
+  } catch {
+    return res.status(500).json({ error: 'Failed to fetch overrides' });
   }
 });
 

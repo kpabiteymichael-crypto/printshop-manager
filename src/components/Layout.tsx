@@ -18,27 +18,28 @@ interface NavItem {
   to: string;
   icon: React.ReactNode;
   roles: string[];
+  module: string;
 }
 
 const navItems: NavItem[] = [
-  { label: 'Dashboard',   to: '/dashboard',  icon: <LayoutDashboard size={18} />, roles: ['owner', 'manager'] },
-  { label: 'POS',         to: '/pos',        icon: <ShoppingCart size={18} />,    roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Print Jobs',  to: '/print-jobs', icon: <Printer size={18} />,         roles: ['owner', 'manager', 'print_operator', 'cashier'] },
-  { label: 'Inventory',   to: '/inventory',  icon: <Package size={18} />,         roles: ['owner', 'manager', 'inventory_officer'] },
-  { label: 'Bookstore',   to: '/bookstore',  icon: <BookOpen size={18} />,        roles: ['owner', 'manager', 'inventory_officer', 'cashier'] },
-  { label: 'Customers',   to: '/customers',  icon: <Users size={18} />,           roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Suppliers',      to: '/suppliers',       icon: <Truck size={18} />,         roles: ['owner', 'manager', 'inventory_officer'] },
-  { label: 'Purchase Orders', to: '/purchase-orders', icon: <ClipboardList size={18} />, roles: ['owner', 'manager', 'inventory_officer'] },
-  { label: 'Cash',        to: '/cash',       icon: <Wallet size={18} />,          roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Expenses',    to: '/expenses',   icon: <Receipt size={18} />,         roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Debts',       to: '/debts',      icon: <CreditCard size={18} />,      roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Sales History', to: '/sales',     icon: <ShoppingBag size={18} />,     roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Receipts',    to: '/receipts',   icon: <BookMarked size={18} />,      roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Quotations',  to: '/quotations', icon: <FileText size={18} />,        roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Invoices',    to: '/invoices',   icon: <FileText size={18} />,        roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Reports',     to: '/reports',    icon: <BarChart3 size={18} />,       roles: ['owner', 'manager'] },
-  { label: 'Staff',       to: '/staff',      icon: <UserCog size={18} />,         roles: ['owner'] },
-  { label: 'Settings',    to: '/settings',   icon: <Settings size={18} />,        roles: ['owner', 'manager'] },
+  { label: 'Dashboard',      to: '/dashboard',       icon: <LayoutDashboard size={18} />, roles: ['owner', 'manager'],                                    module: 'dashboard' },
+  { label: 'POS',            to: '/pos',             icon: <ShoppingCart size={18} />,    roles: ['owner', 'manager', 'cashier'],                         module: 'pos' },
+  { label: 'Print Jobs',     to: '/print-jobs',      icon: <Printer size={18} />,         roles: ['owner', 'manager', 'print_operator', 'cashier'],       module: 'print-jobs' },
+  { label: 'Inventory',      to: '/inventory',       icon: <Package size={18} />,         roles: ['owner', 'manager', 'inventory_officer'],               module: 'inventory' },
+  { label: 'Bookstore',      to: '/bookstore',       icon: <BookOpen size={18} />,        roles: ['owner', 'manager', 'inventory_officer', 'cashier'],    module: 'bookstore' },
+  { label: 'Customers',      to: '/customers',       icon: <Users size={18} />,           roles: ['owner', 'manager', 'cashier'],                         module: 'customers' },
+  { label: 'Suppliers',      to: '/suppliers',       icon: <Truck size={18} />,           roles: ['owner', 'manager', 'inventory_officer'],               module: 'suppliers' },
+  { label: 'Purchase Orders', to: '/purchase-orders', icon: <ClipboardList size={18} />, roles: ['owner', 'manager', 'inventory_officer'],               module: 'purchase-orders' },
+  { label: 'Cash',           to: '/cash',            icon: <Wallet size={18} />,          roles: ['owner', 'manager', 'cashier'],                         module: 'cash' },
+  { label: 'Expenses',       to: '/expenses',        icon: <Receipt size={18} />,         roles: ['owner', 'manager', 'cashier'],                         module: 'expenses' },
+  { label: 'Debts',          to: '/debts',           icon: <CreditCard size={18} />,      roles: ['owner', 'manager', 'cashier'],                         module: 'debts' },
+  { label: 'Sales History',  to: '/sales',           icon: <ShoppingBag size={18} />,     roles: ['owner', 'manager', 'cashier'],                         module: 'sales' },
+  { label: 'Receipts',       to: '/receipts',        icon: <BookMarked size={18} />,      roles: ['owner', 'manager', 'cashier'],                         module: 'receipts' },
+  { label: 'Quotations',     to: '/quotations',      icon: <FileText size={18} />,        roles: ['owner', 'manager', 'cashier'],                         module: 'quotations' },
+  { label: 'Invoices',       to: '/invoices',        icon: <FileText size={18} />,        roles: ['owner', 'manager', 'cashier'],                         module: 'invoices' },
+  { label: 'Reports',        to: '/reports',         icon: <BarChart3 size={18} />,       roles: ['owner', 'manager'],                                    module: 'reports' },
+  { label: 'Staff',          to: '/staff',           icon: <UserCog size={18} />,         roles: ['owner'],                                               module: 'staff' },
+  { label: 'Settings',       to: '/settings',        icon: <Settings size={18} />,        roles: ['owner', 'manager'],                                    module: 'settings' },
 ];
 
 const ROLE_LABELS: Record<string, string> = {
@@ -58,7 +59,7 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 export default function Layout() {
-  const { user, logout, updateUser } = useAuth();
+  const { user, logout, updateUser, activeOverrides } = useAuth();
   const { toggleTheme, isDark } = useTheme();
   const isOnline = useOnline();
   const navigate = useNavigate();
@@ -104,7 +105,7 @@ export default function Layout() {
   }, [isOnline]);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
-  const userNav = navItems.filter(n => user && n.roles.includes(user.role));
+  const userNav = navItems.filter(n => user && (n.roles.includes(user.role) || activeOverrides.includes(n.module)));
 
   const handleLogout = () => { logout(); navigate('/login'); };
 

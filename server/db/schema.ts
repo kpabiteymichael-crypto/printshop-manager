@@ -377,6 +377,21 @@ export const loyaltyPointTransactions = pgTable('loyalty_point_transactions', {
   customerIdx: index('lpt_customer_idx').on(t.customerId),
 }));
 
+// ─── Permission Overrides ─────────────────────────────────
+export const permissionOverrides = pgTable('permission_overrides', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  module: text('module').notNull(),
+  grantedBy: integer('granted_by').notNull().references(() => users.id),
+  expiresAt: timestamp('expires_at').notNull(),
+  reason: text('reason'),
+  isRevoked: boolean('is_revoked').notNull().default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index('perm_override_user_idx').on(t.userId),
+  moduleIdx: index('perm_override_module_idx').on(t.module),
+}));
+
 // ─── Settings ────────────────────────────────────────────
 export const settings = pgTable('settings', {
   key: text('key').primaryKey(),

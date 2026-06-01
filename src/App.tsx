@@ -33,8 +33,8 @@ function PageLoader() {
   );
 }
 
-function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
-  const { user, loading } = useAuth();
+function ProtectedRoute({ children, roles, module }: { children: React.ReactNode; roles?: string[]; module?: string }) {
+  const { user, loading, activeOverrides } = useAuth();
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
       <div className="text-center">
@@ -44,7 +44,11 @@ function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?
     </div>
   );
   if (!user) return <Navigate to="/login" replace />;
-  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+  if (roles) {
+    const hasRole = roles.includes(user.role);
+    const hasOverride = module ? activeOverrides.includes(module) : false;
+    if (!hasRole && !hasOverride) return <Navigate to="/" replace />;
+  }
   return <>{children}</>;
 }
 
@@ -70,109 +74,109 @@ export default function App() {
                 <Route index element={<HomeRedirect />} />
 
                 <Route path="dashboard" element={
-                  <ProtectedRoute roles={['owner', 'manager']}>
+                  <ProtectedRoute roles={['owner', 'manager']} module="dashboard">
                     <Suspense fallback={<PageLoader />}><Dashboard /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="pos" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']} module="pos">
                     <Suspense fallback={<PageLoader />}><POS /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="print-jobs" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'print_operator', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'print_operator', 'cashier']} module="print-jobs">
                     <Suspense fallback={<PageLoader />}><PrintJobs /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="inventory" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']} module="inventory">
                     <Suspense fallback={<PageLoader />}><Inventory /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="bookstore" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer', 'cashier']} module="bookstore">
                     <Suspense fallback={<PageLoader />}><Bookstore /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="customers" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']} module="customers">
                     <Suspense fallback={<PageLoader />}><Customers /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="suppliers" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']} module="suppliers">
                     <Suspense fallback={<PageLoader />}><Suppliers /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="purchase-orders" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'inventory_officer']} module="purchase-orders">
                     <Suspense fallback={<PageLoader />}><PurchaseOrders /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="cash" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']} module="cash">
                     <Suspense fallback={<PageLoader />}><Cash /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="expenses" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']} module="expenses">
                     <Suspense fallback={<PageLoader />}><Expenses /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="debts" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']} module="debts">
                     <Suspense fallback={<PageLoader />}><Debts /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="reports" element={
-                  <ProtectedRoute roles={['owner', 'manager']}>
+                  <ProtectedRoute roles={['owner', 'manager']} module="reports">
                     <Suspense fallback={<PageLoader />}><Reports /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="receipts" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']} module="receipts">
                     <Suspense fallback={<PageLoader />}><Receipts /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="sales" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']} module="sales">
                     <Suspense fallback={<PageLoader />}><SalesHistory /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="quotations" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']} module="quotations">
                     <Suspense fallback={<PageLoader />}><Quotations /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="invoices" element={
-                  <ProtectedRoute roles={['owner', 'manager', 'cashier']}>
+                  <ProtectedRoute roles={['owner', 'manager', 'cashier']} module="invoices">
                     <Suspense fallback={<PageLoader />}><Invoices /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="staff" element={
-                  <ProtectedRoute roles={['owner', 'manager']}>
+                  <ProtectedRoute roles={['owner', 'manager']} module="staff">
                     <Suspense fallback={<PageLoader />}><Staff /></Suspense>
                   </ProtectedRoute>
                 } />
 
                 <Route path="settings" element={
-                  <ProtectedRoute roles={['owner', 'manager']}>
+                  <ProtectedRoute roles={['owner', 'manager']} module="settings">
                     <Suspense fallback={<PageLoader />}><Settings /></Suspense>
                   </ProtectedRoute>
                 } />

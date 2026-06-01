@@ -670,6 +670,22 @@ export async function runMigrations() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP;
   `);
 
+  // Create permission_overrides table
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS permission_overrides (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      module TEXT NOT NULL,
+      granted_by INTEGER NOT NULL REFERENCES users(id),
+      expires_at TIMESTAMP NOT NULL,
+      reason TEXT,
+      is_revoked BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS perm_override_user_idx ON permission_overrides(user_id);
+    CREATE INDEX IF NOT EXISTS perm_override_module_idx ON permission_overrides(module);
+  `);
+
   // Create loyalty_point_transactions table
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS loyalty_point_transactions (

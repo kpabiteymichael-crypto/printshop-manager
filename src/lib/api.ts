@@ -44,6 +44,7 @@ export const authApi = {
     api.post('/auth/login', { email, password }).then(r => r.data),
   logout: () => api.post('/auth/logout').then(r => r.data),
   me: () => api.get('/auth/me').then(r => r.data),
+  myOverrides: () => api.get('/auth/my-overrides').then(r => r.data as { modules: string[] }),
   updateProfile: (data: { name?: string; email?: string; phone?: string; currentPassword?: string; newPassword?: string }) =>
     api.put('/auth/profile', data).then(r => r.data),
 };
@@ -248,6 +249,10 @@ export const settingsApi = {
   updateStaff: (id: number, data: object) => api.put(`/settings/staff/${id}`, data).then(r => r.data),
   securityEvents: (limit = 100) => api.get('/settings/security-events', { params: { limit } }).then(r => r.data),
   securityEventsCount: () => api.get('/settings/security-events/count').then(r => r.data),
+  permissionOverrides: () => api.get('/settings/permission-overrides').then(r => r.data),
+  grantOverride: (data: { userId: number; module: string; expiresAt: string; reason?: string }) =>
+    api.post('/settings/permission-overrides', data).then(r => r.data),
+  revokeOverride: (id: number) => api.delete(`/settings/permission-overrides/${id}`).then(r => r.data),
 };
 
 // ─── Notifications ────────────────────────────────────────
