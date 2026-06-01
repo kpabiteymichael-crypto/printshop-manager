@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
-import { customers, sales, printJobs, debts } from '../db/schema';
+import { customers, sales, printJobs, debts, loyaltyPointTransactions, settings } from '../db/schema';
 import { eq, ilike, sql, desc } from 'drizzle-orm';
 import { z } from 'zod';
+import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 router.use(authenticate);
@@ -128,6 +129,67 @@ router.delete('/:id', authorize('owner', 'manager'), async (req, res) => {
     await db.delete(customers).where(eq(customers.id, Number(req.params.id)));
     return res.json({ success: true });
   } catch { return res.status(500).json({ error: 'Failed to delete customer' }); }
+});
+
+// ─── Loyalty: get point history for a customer ────────────────────────────────
+router.get('/:id/loyalty-history', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = await db.execute(sql`
+      SELECT lpt.id, lpt.points, lpt.type, lpt.description, lpt.created_at,
+             s.sale_number, u.name as staff_name
+      FROM loyalty_point_transactions lpt
+      LEFT JOIN sales s ON s.id = lpt.sale_id
+      LEFT JOIN users u ON u.id = lpt.created_by
+      WHERE lpt.customer_id = ${id}
+      ORDER BY lpt.created_at DESC
+    `);
+    return res.json((result as any).rows ?? []);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch loyalty history' });
+  }
+});
+
+// ─── Loyalty: manual point adjustment (owner/manager only) ───────────────────
+router.post('/:id/loyalty-adjust', authorize('owner', 'manager'), async (req: AuthRequest, res) => {
+  try {
+    const id = Number(req.params.id);
+    const data = z.object({
+      points: z.number().int().refine(v => v !== 0, { message: 'Points cannot be 0' }),
+      reason: z.string().min(1),
+    }).parse(req.body);
+
+    const [cust] = await db.select({ loyaltyPoints: customers.loyaltyPoints })
+      .from(customers).where(eq(customers.id, id)).limit(1);
+    if (!cust) return res.status(404).json({ error: 'Customer not found' });
+
+    const newTotal = cust.loyaltyPoints + data.points;
+    if (newTotal < 0) {
+      return res.status(400).json({ error: `Cannot deduct ${Math.abs(data.points)} pts — customer only has ${cust.loyaltyPoints} pts.` });
+    }
+
+    await db.update(customers)
+      .set({ loyaltyPoints: sql`loyalty_points + ${data.points}`, updatedAt: new Date() })
+      .where(eq(customers.id, id));
+
+    await db.insert(loyaltyPointTransactions).values({
+      customerId: id,
+      points: data.points,
+      type: 'adjusted',
+      description: data.reason,
+      createdBy: req.user!.id,
+    });
+
+    const [updated] = await db.select({ loyaltyPoints: customers.loyaltyPoints })
+      .from(customers).where(eq(customers.id, id)).limit(1);
+
+    return res.json({ success: true, loyaltyPoints: updated.loyaltyPoints });
+  } catch (err: any) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors[0]?.message ?? 'Validation error' });
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to adjust loyalty points' });
+  }
 });
 
 export default router;

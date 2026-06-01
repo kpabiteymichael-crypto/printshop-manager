@@ -363,6 +363,20 @@ export const notifications = pgTable('notifications', {
   userIdx: index('notifications_user_idx').on(t.userId),
 }));
 
+// ─── Loyalty Point Transactions ──────────────────────────
+export const loyaltyPointTransactions = pgTable('loyalty_point_transactions', {
+  id: serial('id').primaryKey(),
+  customerId: integer('customer_id').notNull().references(() => customers.id),
+  points: integer('points').notNull(),
+  type: text('type').notNull().default('earned'),
+  saleId: integer('sale_id').references(() => sales.id),
+  description: text('description'),
+  createdBy: integer('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+  customerIdx: index('lpt_customer_idx').on(t.customerId),
+}));
+
 // ─── Settings ────────────────────────────────────────────
 export const settings = pgTable('settings', {
   key: text('key').primaryKey(),

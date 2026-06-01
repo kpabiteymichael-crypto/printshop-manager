@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { settingsApi } from '../lib/api';
-import { Settings as SettingsIcon, Save, CheckCircle } from 'lucide-react';
+import { Settings as SettingsIcon, Save, CheckCircle, Star } from 'lucide-react';
 
 export default function Settings() {
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -88,6 +88,71 @@ export default function Settings() {
           <div>
             <label className="label dark:text-slate-300">Receipt Footer Message</label>
             <textarea rows={3} value={settings.receipt_footer ?? ''} onChange={e => set('receipt_footer', e.target.value)} className="input resize-none dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="Thank you for your business! Come again." />
+          </div>
+        </div>
+
+        <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+          <h2 className="section-title dark:text-white mb-1 flex items-center gap-2"><Star size={16} className="text-amber-500" /> Loyalty Programme</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Configure how customers earn and redeem loyalty points.</p>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-2">
+              <div>
+                <div className="text-sm font-semibold text-slate-800 dark:text-white">Enable Loyalty Programme</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">Award points automatically on every paid sale</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => set('loyalty_enabled', (settings.loyalty_enabled ?? 'true') === 'false' ? 'true' : 'false')}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${(settings.loyalty_enabled ?? 'true') !== 'false' ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${(settings.loyalty_enabled ?? 'true') !== 'false' ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label dark:text-slate-300">Points per GH₵1 spent</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="100"
+                  value={settings.loyalty_earn_rate ?? '1'}
+                  onChange={e => set('loyalty_earn_rate', e.target.value)}
+                  className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                  placeholder="1"
+                />
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">e.g. 1 = earn 1 point per GH₵1 spent</p>
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">Points needed per GH₵1 discount</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="1"
+                  value={settings.loyalty_points_per_cedis ?? '100'}
+                  onChange={e => set('loyalty_points_per_cedis', e.target.value)}
+                  className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                  placeholder="100"
+                />
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">e.g. 100 = 100 pts gives GH₵1 off</p>
+              </div>
+            </div>
+            <div>
+              <label className="label dark:text-slate-300">Minimum points to redeem</label>
+              <input
+                type="number"
+                step="1"
+                min="1"
+                value={settings.loyalty_min_redeem ?? '100'}
+                onChange={e => set('loyalty_min_redeem', e.target.value)}
+                className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white max-w-48"
+                placeholder="100"
+              />
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Customer must have at least this many points to redeem</p>
+            </div>
+            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-300">
+              <strong>Example:</strong> With earn rate = 1 and 100 pts = GH₵1 — a GH₵50 sale earns 50 pts worth GH₵0.50.
+            </div>
           </div>
         </div>
 

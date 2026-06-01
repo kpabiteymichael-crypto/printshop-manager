@@ -118,6 +118,9 @@ export const customersApi = {
   create: (data: object) => api.post('/customers', data).then(r => r.data),
   update: (id: number, data: object) => api.put(`/customers/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/customers/${id}`).then(r => r.data),
+  loyaltyHistory: (id: number) => api.get(`/customers/${id}/loyalty-history`).then(r => r.data),
+  loyaltyAdjust: (id: number, data: { points: number; reason: string }) =>
+    api.post(`/customers/${id}/loyalty-adjust`, data).then(r => r.data),
 };
 
 // ─── Suppliers ────────────────────────────────────────────

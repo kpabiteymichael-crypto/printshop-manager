@@ -3,9 +3,9 @@ import { authenticate, authorize } from '../middleware/auth';
 import { db } from '../db/index';
 import {
   sales, saleItems, products, services, inventoryItems, inventoryMovements,
-  cashSessions, customers, receipts, users, debts,
+  cashSessions, customers, receipts, users, debts, loyaltyPointTransactions, settings,
 } from '../db/schema';
-import { eq, sql, and, ilike, or } from 'drizzle-orm';
+import { eq, sql, and } from 'drizzle-orm';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 
@@ -130,10 +130,15 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
       isCredit: z.boolean().optional(),
       creditDueDate: z.string().optional(),
       notes: z.string().optional(),
+      pointsToRedeem: z.number().int().min(0).optional().default(0),
     }).parse(req.body);
 
     if (data.isCredit && !data.customerId) {
       return res.status(400).json({ error: 'Credit sales require a customer to be selected.' });
+    }
+
+    if (data.pointsToRedeem && !data.customerId) {
+      return res.status(400).json({ error: 'A customer must be selected to redeem loyalty points.' });
     }
 
     // Validate paymentLines sum when provided
@@ -142,6 +147,56 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
       const saleTotal = parseFloat(data.totalAmount);
       if (Math.abs(linesTotal - saleTotal) > 0.01) {
         return res.status(400).json({ error: `Payment lines total (${linesTotal.toFixed(2)}) does not match sale total (${saleTotal.toFixed(2)}).` });
+      }
+    }
+
+    // Validate loyalty points redemption — enforce all business rules server-side
+    if (data.pointsToRedeem && data.pointsToRedeem > 0 && data.customerId) {
+      // Fetch loyalty settings to enforce rules independently of client
+      const loyaltySettingRows = await db.select().from(settings)
+        .where(sql`key IN ('loyalty_enabled', 'loyalty_points_per_cedis', 'loyalty_min_redeem')`);
+      const lsMap: Record<string, string> = {};
+      loyaltySettingRows.forEach(r => { lsMap[r.key] = r.value; });
+      const loyaltyEnabled = (lsMap['loyalty_enabled'] ?? 'true') !== 'false';
+      if (!loyaltyEnabled) {
+        return res.status(400).json({ error: 'Loyalty programme is currently disabled.' });
+      }
+      const pointsPerCedisRaw = parseFloat(lsMap['loyalty_points_per_cedis'] ?? '100');
+      const pointsPerCedis = isFinite(pointsPerCedisRaw) && pointsPerCedisRaw > 0 ? pointsPerCedisRaw : 100;
+      const minRedeemRaw = parseInt(lsMap['loyalty_min_redeem'] ?? '100', 10);
+      const minRedeem = isFinite(minRedeemRaw) && minRedeemRaw >= 0 ? minRedeemRaw : 100;
+
+      // Enforce minimum redemption threshold
+      if (data.pointsToRedeem < minRedeem) {
+        return res.status(400).json({ error: `Minimum redemption is ${minRedeem} points. You are attempting to redeem ${data.pointsToRedeem} points.` });
+      }
+
+      // Enforce max redemption: cannot redeem more value than the subtotal
+      const subtotalVal = parseFloat(data.subtotal);
+      const maxRedeemablePoints = Math.floor(subtotalVal * pointsPerCedis);
+      if (data.pointsToRedeem > maxRedeemablePoints) {
+        return res.status(400).json({ error: `Cannot redeem more than ${maxRedeemablePoints} points against this sale (subtotal GH₵${subtotalVal.toFixed(2)}).` });
+      }
+
+      // Verify financial consistency: loyalty discount must align with points submitted
+      const loyaltyDiscountValue = data.pointsToRedeem / pointsPerCedis;
+      const declaredDiscount = parseFloat(data.discountAmount);
+      if (declaredDiscount + 0.02 < loyaltyDiscountValue) {
+        return res.status(400).json({ error: 'Declared discount amount is inconsistent with loyalty points redeemed.' });
+      }
+
+      // Verify total is plausible: total ≈ subtotal - discount (within 1 cent)
+      const expectedTotal = subtotalVal - declaredDiscount;
+      const submittedTotal = parseFloat(data.totalAmount);
+      if (Math.abs(submittedTotal - expectedTotal) > 0.02) {
+        return res.status(400).json({ error: `Sale total (${submittedTotal.toFixed(2)}) does not match subtotal minus discount (${expectedTotal.toFixed(2)}).` });
+      }
+
+      // Verify customer has enough points
+      const [cust] = await db.select({ loyaltyPoints: customers.loyaltyPoints })
+        .from(customers).where(eq(customers.id, data.customerId)).limit(1);
+      if (!cust || cust.loyaltyPoints < data.pointsToRedeem) {
+        return res.status(400).json({ error: `Customer only has ${cust?.loyaltyPoints ?? 0} loyalty points available.` });
       }
     }
 
@@ -234,11 +289,76 @@ router.post('/sale', authorize('owner', 'manager', 'cashier'), async (req: AuthR
         });
       }
 
-      // Update customer total spent
+      // Update customer total spent + handle loyalty points
       if (data.customerId) {
         await tx.update(customers)
           .set({ totalSpent: sql`total_spent + ${parseFloat(data.totalAmount)}`, updatedAt: new Date() })
           .where(eq(customers.id, data.customerId));
+
+        // Fetch loyalty settings
+        const settingsRows = await tx.select().from(settings)
+          .where(sql`key IN ('loyalty_earn_rate', 'loyalty_points_per_cedis', 'loyalty_enabled')`);
+        const sMap: Record<string, string> = {};
+        settingsRows.forEach(r => { sMap[r.key] = r.value; });
+        const loyaltyEnabled = (sMap['loyalty_enabled'] ?? 'true') !== 'false';
+        const earnRateRaw = parseFloat(sMap['loyalty_earn_rate'] ?? '1');
+        const earnRate = isFinite(earnRateRaw) && earnRateRaw >= 0 ? earnRateRaw : 1;
+        const pointsPerCedisRaw2 = parseFloat(sMap['loyalty_points_per_cedis'] ?? '100');
+        const txPointsPerCedis = isFinite(pointsPerCedisRaw2) && pointsPerCedisRaw2 > 0 ? pointsPerCedisRaw2 : 100;
+
+        const pointsRedeemed = data.pointsToRedeem ?? 0;
+        const pointsEarned = loyaltyEnabled && !data.isCredit
+          ? Math.floor(parseFloat(data.totalAmount) * earnRate)
+          : 0;
+
+        // Atomically deduct redeemed points: use conditional WHERE to prevent going negative
+        if (pointsRedeemed > 0) {
+          const deductResult = await tx.execute(sql`
+            UPDATE customers SET loyalty_points = loyalty_points - ${pointsRedeemed}, updated_at = NOW()
+            WHERE id = ${data.customerId} AND loyalty_points >= ${pointsRedeemed}
+            RETURNING id
+          `);
+          const deducted = ((deductResult as any).rows ?? []).length;
+          if (!deducted) {
+            throw new Error('Insufficient loyalty points — possible concurrent update. Please retry the sale.');
+          }
+        }
+
+        // Award earned points
+        if (pointsEarned > 0) {
+          await tx.update(customers)
+            .set({ loyaltyPoints: sql`loyalty_points + ${pointsEarned}`, updatedAt: new Date() })
+            .where(eq(customers.id, data.customerId));
+        }
+
+        // Update sale with points data
+        await tx.execute(sql`
+          UPDATE sales SET points_earned = ${pointsEarned}, points_redeemed = ${pointsRedeemed}
+          WHERE id = ${sale.id}
+        `);
+
+        // Record point transactions
+        if (pointsEarned > 0) {
+          await tx.insert(loyaltyPointTransactions).values({
+            customerId: data.customerId,
+            points: pointsEarned,
+            type: 'earned',
+            saleId: sale.id,
+            description: `Earned from sale ${saleNumber}`,
+            createdBy: req.user!.id,
+          });
+        }
+        if (pointsRedeemed > 0) {
+          const cedisValue = pointsRedeemed / txPointsPerCedis;
+          await tx.insert(loyaltyPointTransactions).values({
+            customerId: data.customerId,
+            points: -pointsRedeemed,
+            type: 'redeemed',
+            saleId: sale.id,
+            description: `Redeemed ${pointsRedeemed} pts (GH₵${cedisValue.toFixed(2)} off) on sale ${saleNumber}`,
+            createdBy: req.user!.id,
+          });
+        }
       }
 
       // Update cash session totals — credit sales collect no cash, exclude them

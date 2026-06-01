@@ -670,5 +670,32 @@ export async function runMigrations() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP;
   `);
 
+  // Create loyalty_point_transactions table
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS loyalty_point_transactions (
+      id SERIAL PRIMARY KEY,
+      customer_id INTEGER NOT NULL REFERENCES customers(id),
+      points INTEGER NOT NULL,
+      type TEXT NOT NULL DEFAULT 'earned',
+      sale_id INTEGER REFERENCES sales(id),
+      description TEXT,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS lpt_customer_idx ON loyalty_point_transactions(customer_id);
+  `);
+
+  // Add points_earned and points_redeemed columns to sales for tracking
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sales' AND column_name='points_earned') THEN
+        ALTER TABLE sales ADD COLUMN points_earned INTEGER NOT NULL DEFAULT 0;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sales' AND column_name='points_redeemed') THEN
+        ALTER TABLE sales ADD COLUMN points_redeemed INTEGER NOT NULL DEFAULT 0;
+      END IF;
+    END $$;
+  `);
+
   console.log('Migrations completed successfully!');
 }

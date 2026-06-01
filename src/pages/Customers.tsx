@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { customersApi, debtsApi } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import {
   Users, Plus, Search, Phone, Mail, MapPin, X, ChevronRight,
   AlertCircle, TrendingUp, Printer, ShoppingCart, CreditCard, Star,
+  PlusCircle, MinusCircle, History,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -37,7 +39,8 @@ const STATUS_COLORS: Record<string, string> = {
   partial: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
 };
 
-function CustomerProfile({ customer, onClose }: { customer: any; onClose: () => void }) {
+function CustomerProfile({ customer, onClose, onPointsUpdated }: { customer: any; onClose: () => void; onPointsUpdated?: (id: number, pts: number) => void }) {
+  const { user } = useAuth();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'overview' | 'purchases' | 'jobs' | 'debts' | 'loyalty'>('overview');
@@ -45,9 +48,44 @@ function CustomerProfile({ customer, onClose }: { customer: any; onClose: () => 
   const [payForm, setPayForm] = useState({ amount: '', paymentMethod: 'cash', notes: '' });
   const [paying, setPaying] = useState(false);
 
+  // Loyalty
+  const [loyaltyHistory, setLoyaltyHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [showAdjust, setShowAdjust] = useState(false);
+  const [adjustForm, setAdjustForm] = useState({ points: '', reason: '' });
+  const [adjusting, setAdjusting] = useState(false);
+  const canAdjust = user?.role === 'owner' || user?.role === 'manager';
+
   useEffect(() => {
     customersApi.profile(customer.id).then(setProfile).finally(() => setLoading(false));
   }, [customer.id]);
+
+  useEffect(() => {
+    if (tab === 'loyalty' && profile) {
+      setHistoryLoading(true);
+      customersApi.loyaltyHistory(customer.id)
+        .then(setLoyaltyHistory)
+        .catch(() => setLoyaltyHistory([]))
+        .finally(() => setHistoryLoading(false));
+    }
+  }, [tab, customer.id, profile]);
+
+  const handleAdjust = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const pts = parseInt(adjustForm.points);
+    if (!pts || !adjustForm.reason.trim()) return;
+    setAdjusting(true);
+    try {
+      const result = await customersApi.loyaltyAdjust(customer.id, { points: pts, reason: adjustForm.reason });
+      setProfile((p: any) => p ? { ...p, loyaltyPoints: result.loyaltyPoints } : p);
+      onPointsUpdated?.(customer.id, result.loyaltyPoints);
+      setAdjustForm({ points: '', reason: '' });
+      setShowAdjust(false);
+      setHistoryLoading(true);
+      customersApi.loyaltyHistory(customer.id).then(setLoyaltyHistory).finally(() => setHistoryLoading(false));
+    } catch (err: any) { alert(err.message); }
+    finally { setAdjusting(false); }
+  };
 
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,16 +209,60 @@ function CustomerProfile({ customer, onClose }: { customer: any; onClose: () => 
             const progress = nextTier ? Math.min(100, (pts / nextTier.pts) * 100) : 100;
             return (
               <div className="space-y-5">
+                {/* Tier card */}
                 <div className="flex items-center gap-4 p-4 rounded-2xl bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border border-indigo-100 dark:border-indigo-800">
-                  <div className="w-14 h-14 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center shadow-md">
+                  <div className="w-14 h-14 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center shadow-md flex-shrink-0">
                     <Star size={28} className={tier === 'Gold' ? 'text-amber-500' : tier === 'Silver' ? 'text-slate-400' : 'text-orange-500'} fill="currentColor" />
                   </div>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <div className={clsx('text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-1', tierColor)}>{tier} Member</div>
                     <div className="text-3xl font-bold text-slate-900 dark:text-white">{pts.toLocaleString()}</div>
                     <div className="text-sm text-slate-500 dark:text-slate-400">Loyalty Points</div>
                   </div>
+                  {canAdjust && (
+                    <button
+                      onClick={() => setShowAdjust(v => !v)}
+                      className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:border-indigo-400 transition-colors flex-shrink-0"
+                    >
+                      <PlusCircle size={12} /> Adjust
+                    </button>
+                  )}
                 </div>
+
+                {/* Manual adjustment form */}
+                {showAdjust && canAdjust && (
+                  <form onSubmit={handleAdjust} className="bg-white dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl p-4 space-y-3">
+                    <div className="text-xs font-semibold text-slate-700 dark:text-white uppercase tracking-wider">Manually Adjust Points</div>
+                    <div>
+                      <label className="label dark:text-slate-300 text-xs">Points (use negative to deduct)</label>
+                      <input
+                        required
+                        type="number"
+                        value={adjustForm.points}
+                        onChange={e => setAdjustForm(p => ({ ...p, points: e.target.value }))}
+                        placeholder="e.g. 50 or -20"
+                        className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="label dark:text-slate-300 text-xs">Reason *</label>
+                      <input
+                        required
+                        type="text"
+                        value={adjustForm.reason}
+                        onChange={e => setAdjustForm(p => ({ ...p, reason: e.target.value }))}
+                        placeholder="e.g. Goodwill bonus, correction..."
+                        className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setShowAdjust(false)} className="flex-1 btn-secondary text-sm py-1.5">Cancel</button>
+                      <button type="submit" disabled={adjusting} className="flex-1 btn-primary text-sm py-1.5">{adjusting ? 'Saving...' : 'Save Adjustment'}</button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Progress to next tier */}
                 {nextTier && (
                   <div>
                     <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1.5">
@@ -196,11 +278,57 @@ function CustomerProfile({ customer, onClose }: { customer: any; onClose: () => 
                 {tier === 'Gold' && (
                   <div className="text-center py-2 text-sm font-semibold text-amber-600 dark:text-amber-400">⭐ Maximum tier reached!</div>
                 )}
+
+                {/* Points history */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <History size={14} className="text-slate-500 dark:text-slate-400" />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Points History</span>
+                  </div>
+                  {historyLoading ? (
+                    <div className="flex justify-center py-6"><div className="w-6 h-6 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" /></div>
+                  ) : loyaltyHistory.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400 dark:text-slate-500 text-sm">No point transactions yet</div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                      {loyaltyHistory.map((tx: any) => {
+                        const isPositive = tx.points > 0;
+                        const typeLabels: Record<string, string> = { earned: 'Earned', redeemed: 'Redeemed', adjusted: 'Adjusted' };
+                        return (
+                          <div key={tx.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-slate-700/40 rounded-xl">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className={clsx(
+                                'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0',
+                                isPositive ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                              )}>
+                                {isPositive ? <PlusCircle size={13} /> : <MinusCircle size={13} />}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                                  {typeLabels[tx.type] ?? tx.type}
+                                  {tx.sale_number && <span className="text-slate-400 font-normal ml-1">· {tx.sale_number}</span>}
+                                </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{tx.description || (tx.staff_name ? `By ${tx.staff_name}` : '')}</div>
+                              </div>
+                            </div>
+                            <div className="text-right flex-shrink-0 ml-2">
+                              <div className={clsx('text-sm font-bold', isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>
+                                {isPositive ? '+' : ''}{tx.points}
+                              </div>
+                              <div className="text-xs text-slate-400">{new Date(tx.created_at).toLocaleDateString('en-GH')}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2 text-sm text-slate-600 dark:text-slate-300">
-                  <div className="font-semibold text-slate-900 dark:text-white text-xs uppercase tracking-wider mb-2">How Points Are Earned</div>
-                  <div className="flex items-center gap-2"><span className="w-5 h-5 bg-indigo-100 dark:bg-indigo-900/30 rounded text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xs font-bold">1</span> Every GH₵1 spent earns 1 point</div>
+                  <div className="font-semibold text-slate-900 dark:text-white text-xs uppercase tracking-wider mb-2">How Points Work</div>
+                  <div className="flex items-center gap-2"><span className="w-5 h-5 bg-indigo-100 dark:bg-indigo-900/30 rounded text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xs font-bold">1</span> Points are awarded on every paid sale (configurable in Settings)</div>
                   <div className="flex items-center gap-2"><span className="w-5 h-5 bg-indigo-100 dark:bg-indigo-900/30 rounded text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xs font-bold">2</span> Bronze (0–499) · Silver (500–1,999) · Gold (2,000+)</div>
-                  <div className="flex items-center gap-2"><span className="w-5 h-5 bg-indigo-100 dark:bg-indigo-900/30 rounded text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xs font-bold">3</span> Points are added automatically on every purchase</div>
+                  <div className="flex items-center gap-2"><span className="w-5 h-5 bg-indigo-100 dark:bg-indigo-900/30 rounded text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xs font-bold">3</span> Points can be redeemed for discounts at checkout</div>
                 </div>
               </div>
             );
@@ -388,7 +516,11 @@ export default function Customers() {
       )}
 
       {selectedCustomer && (
-        <CustomerProfile customer={selectedCustomer} onClose={() => setSelectedCustomer(null)} />
+        <CustomerProfile
+          customer={selectedCustomer}
+          onClose={() => setSelectedCustomer(null)}
+          onPointsUpdated={(id, pts) => setCustomers(prev => prev.map(c => c.id === id ? { ...c, loyaltyPoints: pts } : c))}
+        />
       )}
 
       {showNew && (
