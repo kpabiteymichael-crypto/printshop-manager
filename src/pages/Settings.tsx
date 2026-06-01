@@ -67,18 +67,57 @@ export default function Settings() {
 
         <div className="card dark:bg-slate-800 dark:border-slate-700/50">
           <h2 className="section-title dark:text-white mb-4">Financial Settings</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label dark:text-slate-300">Currency</label>
-              <select value={settings.currency ?? 'PHP'} onChange={e => set('currency', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white">
-                <option value="PHP">PHP — Philippine Peso (₱)</option>
-                <option value="USD">USD — US Dollar ($)</option>
-                <option value="SGD">SGD — Singapore Dollar (S$)</option>
-              </select>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label dark:text-slate-300">Currency</label>
+                <select
+                  value={settings.currency ?? 'GHS'}
+                  onChange={e => {
+                    const symbols: Record<string, string> = {
+                      GHS: 'GH₵', USD: '$', EUR: '€', GBP: '£', NGN: '₦',
+                      KES: 'KSh', ZAR: 'R', PHP: '₱', SGD: 'S$',
+                    };
+                    set('currency', e.target.value);
+                    set('currency_symbol', symbols[e.target.value] ?? e.target.value);
+                  }}
+                  className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                >
+                  <option value="GHS">GHS — Ghana Cedi (GH₵)</option>
+                  <option value="USD">USD — US Dollar ($)</option>
+                  <option value="EUR">EUR — Euro (€)</option>
+                  <option value="GBP">GBP — British Pound (£)</option>
+                  <option value="NGN">NGN — Nigerian Naira (₦)</option>
+                  <option value="KES">KES — Kenyan Shilling (KSh)</option>
+                  <option value="ZAR">ZAR — South African Rand (R)</option>
+                  <option value="PHP">PHP — Philippine Peso (₱)</option>
+                  <option value="SGD">SGD — Singapore Dollar (S$)</option>
+                </select>
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">Currency Symbol</label>
+                <input
+                  type="text"
+                  value={settings.currency_symbol ?? 'GH₵'}
+                  onChange={e => set('currency_symbol', e.target.value)}
+                  className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                  placeholder="GH₵"
+                  maxLength={6}
+                />
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Shown on receipts, invoices, and reports</p>
+              </div>
             </div>
-            <div>
-              <label className="label dark:text-slate-300">Tax Rate (%)</label>
-              <input type="number" step="0.01" min="0" max="100" value={settings.tax_rate ?? '0'} onChange={e => set('tax_rate', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="0" />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label dark:text-slate-300">VAT / Tax Rate (%)</label>
+                <input type="number" step="0.01" min="0" max="100" value={settings.tax_rate ?? '0'} onChange={e => set('tax_rate', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="0" />
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Ghana standard VAT is 15% (NHIL + GETFund inclusive)</p>
+              </div>
+              <div>
+                <label className="label dark:text-slate-300">VAT Registration No.</label>
+                <input type="text" value={settings.vat_number ?? ''} onChange={e => set('vat_number', e.target.value)} className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white" placeholder="e.g. V0012345678" />
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Printed on receipts and invoices if set</p>
+              </div>
             </div>
           </div>
         </div>
