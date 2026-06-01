@@ -31,6 +31,9 @@ export default function Settings() {
       await settingsApi.update(settings);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+      window.dispatchEvent(new CustomEvent('shop-settings-updated', {
+        detail: { shop_logo: settings.shop_logo ?? '', shop_name: settings.shop_name ?? '' },
+      }));
     } catch (err: any) { alert(err.message); }
     finally { setSaving(false); }
   };

@@ -85,6 +85,14 @@ export default function Layout() {
       if (s.shop_logo) setShopLogo(s.shop_logo);
       if (s.shop_name) setShopName(s.shop_name);
     }).catch(() => {});
+
+    const handleSettingsUpdated = (e: Event) => {
+      const { shop_logo, shop_name } = (e as CustomEvent).detail;
+      setShopLogo(shop_logo || null);
+      if (shop_name) setShopName(shop_name);
+    };
+    window.addEventListener('shop-settings-updated', handleSettingsUpdated);
+    return () => window.removeEventListener('shop-settings-updated', handleSettingsUpdated);
   }, []);
 
   useEffect(() => {
