@@ -70,6 +70,14 @@ async function hasActiveOverride(userId: number, module: string): Promise<boolea
   }
 }
 
+const ROLE_DISPLAY: Record<string, string> = {
+  owner: 'Owner',
+  manager: 'Manager',
+  cashier: 'Cashier',
+  print_operator: 'Print Operator',
+  inventory_officer: 'Inventory Officer',
+};
+
 function denyWithAudit(req: AuthRequest, res: Response, roles: string[]) {
   const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
     ?? req.socket?.remoteAddress
@@ -80,10 +88,25 @@ function denyWithAudit(req: AuthRequest, res: Response, roles: string[]) {
     userRole: req.user!.role,
     requiredRoles: roles,
   });
+
   db.execute(sql`
     INSERT INTO audit_logs (user_id, action, entity_type, entity_id, new_values, ip_address, created_at)
     VALUES (${req.user!.id}, 'unauthorized_access', ${req.path}, NULL, ${details}, ${ip}, NOW())
   `).catch(() => {});
+
+  const userName = req.user!.name;
+  const userRole = ROLE_DISPLAY[req.user!.role] ?? req.user!.role;
+  const route = req.originalUrl;
+  const notifTitle = 'Unauthorized Access Attempt';
+  const notifMessage = `${userName} (${userRole}) tried to access ${route}`;
+
+  db.execute(sql`
+    INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+    SELECT id, ${notifTitle}, ${notifMessage}, 'security_alert', false, NOW()
+    FROM users
+    WHERE role IN ('owner', 'manager') AND is_active = true AND id != ${req.user!.id}
+  `).catch(() => {});
+
   return res.status(403).json({ error: 'Forbidden' });
 }
 

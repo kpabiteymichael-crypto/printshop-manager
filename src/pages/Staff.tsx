@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { settingsApi } from '../lib/api';
 import api from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -634,10 +635,24 @@ export default function Staff() {
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'cashier', phone: '' });
   const [saving, setSaving] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
-  const [activeTab, setActiveTab] = useState<'list' | 'activity' | 'security' | 'overrides'>('list');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<'list' | 'activity' | 'security' | 'overrides'>(() => {
+    const t = searchParams.get('tab');
+    if (t === 'security' || t === 'activity' || t === 'overrides') return t;
+    return 'list';
+  });
   const [securityCount, setSecurityCount] = useState(0);
 
   const isOwner = user?.role === 'owner';
+
+  const handleTabChange = (tab: 'list' | 'activity' | 'security' | 'overrides') => {
+    setActiveTab(tab);
+    if (tab === 'list') {
+      setSearchParams({});
+    } else {
+      setSearchParams({ tab });
+    }
+  };
 
   useEffect(() => {
     settingsApi.getStaff().then(setStaff).finally(() => setLoading(false));
@@ -679,17 +694,17 @@ export default function Staff() {
 
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-700 flex-wrap gap-y-0">
-        <button onClick={() => setActiveTab('list')}
+        <button onClick={() => handleTabChange('list')}
           className={clsx('px-5 py-3 text-sm font-semibold transition-colors border-b-2 -mb-px',
             activeTab === 'list' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}>
           Staff List
         </button>
-        <button onClick={() => setActiveTab('activity')}
+        <button onClick={() => handleTabChange('activity')}
           className={clsx('px-5 py-3 text-sm font-semibold transition-colors border-b-2 -mb-px',
             activeTab === 'activity' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}>
           Activity Log
         </button>
-        <button onClick={() => setActiveTab('security')}
+        <button onClick={() => handleTabChange('security')}
           className={clsx('px-5 py-3 text-sm font-semibold transition-colors border-b-2 -mb-px flex items-center gap-2',
             activeTab === 'security' ? 'border-red-500 text-red-600 dark:text-red-400 dark:border-red-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}>
           <ShieldAlert size={14} />
@@ -701,7 +716,7 @@ export default function Staff() {
           )}
         </button>
         {isOwner && (
-          <button onClick={() => setActiveTab('overrides')}
+          <button onClick={() => handleTabChange('overrides')}
             className={clsx('px-5 py-3 text-sm font-semibold transition-colors border-b-2 -mb-px flex items-center gap-2',
               activeTab === 'overrides' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}>
             <Key size={14} />
@@ -776,7 +791,7 @@ export default function Staff() {
                             </button>
                           )}
                           <button
-                            onClick={() => { setSelectedStaff(s); setActiveTab('activity'); }}
+                            onClick={() => { setSelectedStaff(s); handleTabChange('activity'); }}
                             className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
                           >
                             Log

@@ -79,8 +79,14 @@ export default function Layout() {
   const [securityEventCount, setSecurityEventCount] = useState(0);
 
   useEffect(() => {
+    if (!user) return;
     notificationsApi.list().then(setNotifications).catch(() => {});
-  }, []);
+    if (!['owner', 'manager'].includes(user.role)) return;
+    const interval = setInterval(() => {
+      notificationsApi.list().then(setNotifications).catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   useEffect(() => {
     if (!user || !['owner', 'manager', 'inventory_officer'].includes(user.role)) return;
@@ -372,11 +378,24 @@ export default function Layout() {
                   ) : notifications.map(n => (
                     <div
                       key={n.id}
-                      onClick={() => { notificationsApi.markRead(n.id); setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, isRead: true } : x)); }}
+                      onClick={() => {
+                        notificationsApi.markRead(n.id);
+                        setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, isRead: true } : x));
+                        if (n.type === 'security_alert') {
+                          setShowNotifs(false);
+                          navigate('/staff?tab=security');
+                        }
+                      }}
                       className={clsx('px-4 py-3 border-b border-slate-50 dark:border-slate-700/50 last:border-0 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors', !n.isRead && 'bg-indigo-50/60 dark:bg-indigo-900/10')}
                     >
-                      <div className="text-sm font-semibold text-slate-900 dark:text-white">{n.title}</div>
+                      <div className="flex items-center gap-1.5">
+                        {n.type === 'security_alert' && <AlertCircle size={13} className="text-red-500 flex-shrink-0" />}
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white">{n.title}</div>
+                      </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{n.message}</div>
+                      {n.type === 'security_alert' && (
+                        <div className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">Click to view Security Events →</div>
+                      )}
                     </div>
                   ))}
                 </div>
