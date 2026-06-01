@@ -91,6 +91,7 @@ export default function Inventory() {
   const [stocktakeDone, setStocktakeDone] = useState<{ committed: number; errors: number } | null>(null);
   const [stocktakeSearchOpen, setStocktakeSearchOpen] = useState(false);
   const stocktakeSearchRef = useRef<HTMLInputElement>(null);
+  const [stayInScanMode, setStayInScanMode] = useState(true);
 
   // ─── Persist stocktake session to localStorage ───────────────────────────────
   useEffect(() => {
@@ -134,6 +135,11 @@ export default function Inventory() {
             const ref = stocktakeCountedQtyRefs.current[invItem.id];
             if (ref) { ref.focus(); ref.select(); }
             setBarcodeFlash(null); setBarcodeMsg('');
+            if (stayInScanMode) {
+              setTimeout(() => {
+                if (stocktakeScanInputRef.current) { stocktakeScanInputRef.current.focus(); }
+              }, 800);
+            }
           }, 300);
         } else {
           setBarcodeFlash('success');
@@ -150,6 +156,11 @@ export default function Inventory() {
             const ref = stocktakeCountedQtyRefs.current[invItem.id];
             if (ref) { ref.focus(); ref.select(); }
             setBarcodeFlash(null); setBarcodeMsg('');
+            if (stayInScanMode) {
+              setTimeout(() => {
+                if (stocktakeScanInputRef.current) { stocktakeScanInputRef.current.focus(); }
+              }, 800);
+            }
           }, 300);
         }
         if (barcodeInputRef.current) barcodeInputRef.current.value = '';
@@ -201,7 +212,7 @@ export default function Inventory() {
       setBarcodeLoading(false);
       if (barcodeInputRef.current) barcodeInputRef.current.value = '';
     }
-  }, [barcodeLoading, barcodeScanMode, data.items, stocktakeItems]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [barcodeLoading, barcodeScanMode, data.items, stocktakeItems, stayInScanMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Camera scanning (BarcodeDetector API) ──────────────────────────────────
   const stopCamera = useCallback(() => {
@@ -698,13 +709,32 @@ export default function Inventory() {
               <h3 className="font-semibold text-slate-900 dark:text-white text-sm flex items-center gap-2">
                 <Barcode size={14} className="text-indigo-600" /> Scan to Add
               </h3>
-              <button
-                onClick={() => { setBarcodeScanMode('stocktake'); setShowBarcodeScanner(true); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors shadow-sm"
-                title="Open camera barcode scanner"
-              >
-                <Camera size={13} /> Camera Scanner
-              </button>
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer select-none" title="Keep cursor in scan input after each barcode so you can scan the next item immediately">
+                  <div
+                    role="switch"
+                    aria-checked={stayInScanMode}
+                    onClick={() => setStayInScanMode(v => !v)}
+                    className={clsx(
+                      'relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none cursor-pointer',
+                      stayInScanMode ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'
+                    )}
+                  >
+                    <span className={clsx(
+                      'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200',
+                      stayInScanMode ? 'translate-x-4' : 'translate-x-0'
+                    )} />
+                  </div>
+                  <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Stay in scan mode</span>
+                </label>
+                <button
+                  onClick={() => { setBarcodeScanMode('stocktake'); setShowBarcodeScanner(true); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors shadow-sm"
+                  title="Open camera barcode scanner"
+                >
+                  <Camera size={13} /> Camera Scanner
+                </button>
+              </div>
             </div>
             <div className="relative max-w-sm">
               <Barcode size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -745,6 +775,7 @@ export default function Inventory() {
             )}
             <p className="text-xs text-slate-400 dark:text-slate-500">
               USB wedge scanners auto-submit on Enter. Already-counted products jump to their qty row.
+              {stayInScanMode && ' Focus returns here automatically so you can scan the next item right away.'}
             </p>
           </div>
 
