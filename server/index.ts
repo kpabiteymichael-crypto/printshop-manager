@@ -10,17 +10,13 @@ import { createApp } from './app';
 const app = createApp();
 const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 3000 : 3001);
 
-// ── Seed endpoints (non-production only) ──────────────────────────────────────
+// ── Seed endpoints (secret-protected, available in all environments) ──────────
 const seedSecret = process.env.SEED_SECRET;
 if (!seedSecret) {
-  if (process.env.NODE_ENV === 'production') {
-    logger.warn('SEED_SECRET not set — seed endpoints disabled in production');
-  } else {
-    logger.warn('[WARNING] SEED_SECRET is not set. Seed endpoints disabled. Set SEED_SECRET to enable them.');
-  }
+  logger.warn('SEED_SECRET not set — seed endpoints disabled. Set SEED_SECRET to enable.');
 }
 
-if (seedSecret && process.env.NODE_ENV !== 'production') {
+if (seedSecret) {
   app.post('/api/admin/seed', async (req, res) => {
     const secret = req.headers['x-seed-secret'] || req.query.secret;
     if (secret !== seedSecret) return res.status(401).json({ error: 'Invalid seed secret' });
@@ -61,7 +57,7 @@ async function start() {
       const { seedDatabase } = await import('./db/seed.js');
       await seedDatabase();
     } catch (e) {
-      logger.debug('Seed skipped or already seeded', { reason: (e as Error).message });
+      logger.error('Auto-seed failed on startup', { reason: (e as Error).message });
     }
 
     app.listen(PORT, () => {
