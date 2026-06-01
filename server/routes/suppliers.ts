@@ -5,6 +5,7 @@ import { suppliers, purchaseOrders, purchaseOrderItems, products, inventoryItems
 import { eq, desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
+import nodemailer from 'nodemailer';
 
 const router = Router();
 router.use(authenticate);
@@ -231,6 +232,204 @@ router.put('/purchase-orders/:id/receive', authorize('owner', 'manager', 'invent
     if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
     console.error(err);
     return res.status(500).json({ error: 'Failed to receive purchase order' });
+  }
+});
+
+// POST /api/suppliers/purchase-orders/:id/email  — send PO PDF to supplier
+router.post('/purchase-orders/:id/email', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {
+  try {
+    const poId = Number(req.params.id);
+
+    // Fetch full PO with supplier details and items
+    const result = await db.execute(sql`
+      SELECT
+        po.id, po.po_number, po.status, po.total_amount, po.notes,
+        po.ordered_at, po.expected_delivery_at, po.created_at,
+        s.name as supplier_name, s.email as supplier_email,
+        s.contact_name as supplier_contact,
+        u.name as ordered_by_name,
+        json_agg(
+          json_build_object(
+            'productName', p.name,
+            'productSku', p.sku,
+            'quantity', poi.quantity,
+            'unitPrice', poi.unit_price,
+            'totalPrice', poi.total_price
+          ) ORDER BY poi.id
+        ) FILTER (WHERE poi.id IS NOT NULL) as items
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON po.supplier_id = s.id
+      LEFT JOIN users u ON po.ordered_by = u.id
+      LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
+      LEFT JOIN products p ON p.id = poi.product_id
+      WHERE po.id = ${poId}
+      GROUP BY po.id, s.name, s.email, s.contact_name, u.name
+    `);
+
+    const rows = (result as any).rows ?? [];
+    if (rows.length === 0) return res.status(404).json({ error: 'Purchase order not found' });
+    const po = rows[0];
+
+    if (!po.supplier_email) {
+      return res.status(400).json({ error: 'Supplier has no email address on file' });
+    }
+
+    // Read shop settings
+    const settingsResult = await db.execute(sql`SELECT key, value FROM settings`);
+    const settings: Record<string, string> = {};
+    for (const row of (settingsResult as any).rows ?? []) settings[row.key] = row.value;
+
+    // SMTP config — env vars take priority over settings table
+    const smtpHost = process.env.SMTP_HOST || settings.smtp_host;
+    const smtpPort = Number(process.env.SMTP_PORT || settings.smtp_port || 587);
+    const smtpUser = process.env.SMTP_USER || settings.smtp_user;
+    const smtpPass = process.env.SMTP_PASS || settings.smtp_pass;
+    const smtpFrom = process.env.SMTP_FROM || settings.smtp_from || smtpUser;
+    const shopName = settings.shop_name || 'PrintShop Manager';
+
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      return res.status(503).json({
+        error: 'Email not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS environment variables (or configure them in Settings) to enable email sending.',
+      });
+    }
+
+    // Dynamically import PDFKit to generate the PDF in memory
+    const PDFDocument = (await import('pdfkit')).default;
+
+    const pdfBuffer: Buffer = await new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const margin = 50;
+      const pageWidth = 595.28;
+      const contentWidth = pageWidth - margin * 2;
+      const shopAddress = settings.shop_address || '';
+      const shopPhone = settings.shop_phone || '';
+      const shopEmail = settings.shop_email || '';
+
+      const fmt = (v: number) =>
+        `GHS ${v.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const fmtDate = (d: any) =>
+        d ? new Date(d).toLocaleDateString('en-GH', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+
+      doc.rect(0, 0, pageWidth, 120).fill('#4f46e5');
+      doc.fillColor('white').fontSize(22).font('Helvetica-Bold')
+        .text(shopName, margin, 25, { width: contentWidth * 0.6 });
+      doc.fontSize(9).font('Helvetica').fillColor('#c7d2fe');
+      if (shopAddress) doc.text(shopAddress, margin, 52);
+      if (shopPhone) doc.text(`Tel: ${shopPhone}`, margin, shopAddress ? 64 : 52);
+      if (shopEmail) doc.text(shopEmail, margin, (shopAddress && shopPhone) ? 76 : (shopAddress || shopPhone) ? 64 : 52);
+
+      doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
+        .text('PURCHASE ORDER', margin + contentWidth * 0.5, 25, { width: contentWidth * 0.5, align: 'right' });
+      doc.fillColor('#c7d2fe').fontSize(10).font('Helvetica')
+        .text(`#${po.po_number}`, margin + contentWidth * 0.5, 52, { width: contentWidth * 0.5, align: 'right' });
+      doc.text(`Date: ${fmtDate(po.created_at)}`, margin + contentWidth * 0.5, 65, { width: contentWidth * 0.5, align: 'right' });
+      if (po.expected_delivery_at) {
+        doc.text(`Expected Delivery: ${fmtDate(po.expected_delivery_at)}`, margin + contentWidth * 0.5, 78, { width: contentWidth * 0.5, align: 'right' });
+      }
+
+      let y = 150;
+      doc.fillColor('#1e293b').fontSize(9).font('Helvetica-Bold').text('VENDOR / SUPPLIER', margin, y);
+      y += 14;
+      doc.font('Helvetica').fillColor('#334155').fontSize(11).text(po.supplier_name || '—', margin, y);
+      y += 28;
+
+      doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(margin, y).lineTo(margin + contentWidth, y).stroke();
+      y += 16;
+
+      const colWidths = [contentWidth * 0.10, contentWidth * 0.40, contentWidth * 0.12, contentWidth * 0.19, contentWidth * 0.19];
+      const cols = ['SKU', 'Product', 'Qty', 'Unit Price', 'Total'];
+      const colAligns: Array<'left' | 'right' | 'center'> = ['left', 'left', 'center', 'right', 'right'];
+
+      doc.fillColor('#f8fafc').rect(margin, y, contentWidth, 22).fill();
+      doc.fillColor('#475569').fontSize(9).font('Helvetica-Bold');
+      let x = margin;
+      cols.forEach((col, i) => {
+        doc.text(col, x + (i > 0 ? 4 : 0), y + 7, { width: colWidths[i], align: colAligns[i] });
+        x += colWidths[i];
+      });
+      y += 22;
+
+      doc.font('Helvetica');
+      const items: any[] = po.items ?? [];
+      items.forEach((item: any, idx: number) => {
+        if (idx % 2 === 1) doc.fillColor('#f8fafc').rect(margin, y, contentWidth, 22).fill();
+        doc.fillColor('#1e293b').fontSize(9);
+        x = margin;
+        doc.text(item.productSku || '—', x, y + 6, { width: colWidths[0] - 4 });
+        x += colWidths[0];
+        doc.text(item.productName || '—', x + 4, y + 6, { width: colWidths[1] - 8 });
+        x += colWidths[1];
+        doc.text(String(item.quantity), x + 4, y + 6, { width: colWidths[2] - 4, align: 'center' });
+        x += colWidths[2];
+        doc.text(fmt(parseFloat(item.unitPrice)), x + 4, y + 6, { width: colWidths[3] - 4, align: 'right' });
+        x += colWidths[3];
+        doc.font('Helvetica-Bold').text(fmt(parseFloat(item.totalPrice)), x + 4, y + 6, { width: colWidths[4] - 4, align: 'right' });
+        doc.font('Helvetica');
+        y += 22;
+      });
+
+      y += 8;
+      doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(margin, y).lineTo(margin + contentWidth, y).stroke();
+      y += 10;
+      const totalBoxX = margin + contentWidth * 0.6;
+      const totalBoxW = contentWidth * 0.4;
+      doc.fillColor('#4f46e5').rect(totalBoxX, y, totalBoxW, 36).fill();
+      doc.fillColor('#c7d2fe').fontSize(10).font('Helvetica')
+        .text('TOTAL AMOUNT', totalBoxX + 8, y + 6, { width: totalBoxW - 16 });
+      doc.fillColor('white').fontSize(16).font('Helvetica-Bold')
+        .text(fmt(parseFloat(po.total_amount)), totalBoxX + 8, y + 18, { width: totalBoxW - 16, align: 'right' });
+
+      if (po.notes) {
+        y += 50;
+        doc.fillColor('#475569').fontSize(9).font('Helvetica-Bold').text('NOTES / INSTRUCTIONS', margin, y);
+        y += 12;
+        doc.font('Helvetica').fillColor('#64748b').text(po.notes, margin, y, { width: contentWidth * 0.55 });
+      }
+
+      const footerY = doc.page.height - 50;
+      doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(margin, footerY).lineTo(margin + contentWidth, footerY).stroke();
+      doc.fillColor('#94a3b8').fontSize(8).font('Helvetica')
+        .text(`Generated by ${shopName} — PrintShop Manager`, margin, footerY + 8, { width: contentWidth, align: 'center' });
+      doc.text(`Purchase Order #${po.po_number} | ${fmtDate(po.created_at)}`, margin, footerY + 20, { width: contentWidth, align: 'center' });
+
+      doc.end();
+    });
+
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: { user: smtpUser, pass: smtpPass },
+    });
+
+    const recipientName = po.supplier_contact || po.supplier_name;
+    const deliveryLine = po.expected_delivery_at
+      ? `\nExpected Delivery: ${new Date(po.expected_delivery_at).toLocaleDateString('en-GH', { dateStyle: 'medium' })}`
+      : '';
+
+    await transporter.sendMail({
+      from: `"${shopName}" <${smtpFrom}>`,
+      to: po.supplier_email,
+      subject: `Purchase Order ${po.po_number} from ${shopName}`,
+      text: `Dear ${recipientName},\n\nPlease find attached our Purchase Order ${po.po_number}.${deliveryLine}\n\nTotal Amount: GHS ${parseFloat(po.total_amount).toLocaleString('en-GH', { minimumFractionDigits: 2 })}\n\nKindly acknowledge receipt and confirm availability of items.\n\nRegards,\n${shopName}`,
+      attachments: [
+        {
+          filename: `purchase-order-${po.po_number}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    });
+
+    return res.json({ success: true, sentTo: po.supplier_email });
+  } catch (err: any) {
+    console.error('Email PO error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to send email' });
   }
 });
 

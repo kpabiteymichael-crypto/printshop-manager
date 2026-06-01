@@ -179,6 +179,7 @@ app.use('/api/pdf', pdfRoutes);
 app.get('/api/receipts/:id/pdf', (req: any, _res: any, next: any) => { req.url = `/receipt/${req.params.id}`; next(); }, pdfRoutes);
 app.get('/api/quotations/:id/pdf', (req: any, _res: any, next: any) => { req.url = `/quotation/${req.params.id}`; next(); }, pdfRoutes);
 app.get('/api/invoices/:id/pdf', (req: any, _res: any, next: any) => { req.url = `/invoice/${req.params.id}`; next(); }, pdfRoutes);
+app.get('/api/suppliers/purchase-orders/:id/pdf', (req: any, _res: any, next: any) => { req.url = `/purchase-order/${req.params.id}`; next(); }, pdfRoutes);
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads')));
 

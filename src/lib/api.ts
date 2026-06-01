@@ -134,6 +134,7 @@ export const suppliersApi = {
   updatePOStatus: (id: number, status: string) => api.put(`/suppliers/purchase-orders/${id}/status`, { status }).then(r => r.data),
   receivePO: (id: number, lines?: Array<{ lineItemId: number; deliveredQuantity: number }>) =>
     api.put(`/suppliers/purchase-orders/${id}/receive`, { lines }).then(r => r.data),
+  emailPO: (id: number) => api.post(`/suppliers/purchase-orders/${id}/email`).then(r => r.data),
 };
 
 // ─── Cash ─────────────────────────────────────────────────
@@ -219,6 +220,7 @@ export const pdfApi = {
   receiptUrl: (id: number) => `/api/pdf/receipt/${id}`,
   quotationUrl: (id: number) => `/api/pdf/quotation/${id}`,
   invoiceUrl: (id: number) => `/api/pdf/invoice/${id}`,
+  purchaseOrderUrl: (id: number) => `/api/pdf/purchase-order/${id}`,
   download: async (url: string, filename: string) => {
     const token = localStorage.getItem('ps_token');
     const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });

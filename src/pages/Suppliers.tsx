@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { suppliersApi, productsApi } from '../lib/api';
+import { suppliersApi, productsApi, pdfApi } from '../lib/api';
 import {
   Truck, Plus, Phone, Mail, MapPin, User, ChevronLeft, X,
   ShoppingCart, CheckCircle, Clock, Package, FileText, AlertCircle, Trash2,
+  Download, Send,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -35,6 +36,8 @@ export default function Suppliers() {
 
   const [receivingPO, setReceivingPO] = useState<any>(null);
   const [receiveLines, setReceiveLines] = useState<Record<number, number>>({});
+  const [downloadingPO, setDownloadingPO] = useState<number | null>(null);
+  const [emailingPO, setEmailingPO] = useState<number | null>(null);
 
   const [poForm, setPoForm] = useState({
     supplierId: '',
@@ -142,6 +145,24 @@ export default function Suppliers() {
       await suppliersApi.updatePOStatus(poId, 'ordered');
       if (selected) openProfile(selected);
     } catch (err: any) { alert(err.message); }
+  };
+
+  const handleDownloadPO = async (po: any) => {
+    setDownloadingPO(po.id);
+    try {
+      await pdfApi.download(pdfApi.purchaseOrderUrl(po.id), `purchase-order-${po.po_number}.pdf`);
+    } catch (err: any) { alert(err.message || 'Failed to download PDF'); }
+    finally { setDownloadingPO(null); }
+  };
+
+  const handleEmailPO = async (po: any) => {
+    if (!window.confirm(`Send Purchase Order ${po.po_number} to the supplier's email address?`)) return;
+    setEmailingPO(po.id);
+    try {
+      const result = await suppliersApi.emailPO(po.id);
+      alert(`Purchase order sent successfully to ${result.sentTo}`);
+    } catch (err: any) { alert(err.message || 'Failed to send email'); }
+    finally { setEmailingPO(null); }
   };
 
   const filteredSuppliers = suppliers.filter(s =>
@@ -391,7 +412,7 @@ export default function Suppliers() {
                   </div>
                   <div className="flex items-start gap-2 flex-col sm:flex-row sm:items-center">
                     <span className="font-bold text-slate-900 dark:text-white text-sm">{fmt(po.total_amount)}</span>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 flex-wrap">
                       {po.status === 'draft' && (
                         <button onClick={() => handleMarkOrdered(po.id)}
                           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors">
@@ -402,6 +423,22 @@ export default function Suppliers() {
                         <button onClick={() => openReceiveModal(po)}
                           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors">
                           <CheckCircle size={11} /> Receive
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDownloadPO(po)}
+                        disabled={downloadingPO === po.id}
+                        title="Download PDF"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors disabled:opacity-50">
+                        <Download size={11} />{downloadingPO === po.id ? '…' : 'PDF'}
+                      </button>
+                      {selected?.email && (
+                        <button
+                          onClick={() => handleEmailPO(po)}
+                          disabled={emailingPO === po.id}
+                          title={`Send to ${selected.email}`}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors disabled:opacity-50">
+                          <Send size={11} />{emailingPO === po.id ? 'Sending…' : 'Email'}
                         </button>
                       )}
                     </div>

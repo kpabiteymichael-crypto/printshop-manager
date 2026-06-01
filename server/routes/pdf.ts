@@ -342,4 +342,182 @@ router.get('/invoice/:id', authorize('owner', 'manager', 'cashier'), async (req,
   }
 });
 
+// GET /api/pdf/purchase-order/:id
+router.get('/purchase-order/:id', authorize('owner', 'manager', 'inventory_officer'), async (req, res) => {
+  try {
+    const poId = Number(req.params.id);
+    const result = await db.execute(sql`
+      SELECT
+        po.id, po.po_number, po.status, po.total_amount, po.notes,
+        po.ordered_at, po.expected_delivery_at, po.received_at, po.created_at,
+        s.name as supplier_name, s.contact_name as supplier_contact,
+        s.email as supplier_email, s.phone as supplier_phone, s.address as supplier_address,
+        u.name as ordered_by_name,
+        json_agg(
+          json_build_object(
+            'productName', p.name,
+            'productSku', p.sku,
+            'quantity', poi.quantity,
+            'unitPrice', poi.unit_price,
+            'totalPrice', poi.total_price
+          ) ORDER BY poi.id
+        ) FILTER (WHERE poi.id IS NOT NULL) as items
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON po.supplier_id = s.id
+      LEFT JOIN users u ON po.ordered_by = u.id
+      LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
+      LEFT JOIN products p ON p.id = poi.product_id
+      WHERE po.id = ${poId}
+      GROUP BY po.id, s.name, s.contact_name, s.email, s.phone, s.address, u.name
+    `);
+
+    const rows = (result as any).rows ?? [];
+    if (rows.length === 0) return res.status(404).json({ error: 'Purchase order not found' });
+    const po = rows[0];
+    const settings = await getSettings();
+
+    const shopName = settings.shop_name || 'PrintShop Manager';
+    const shopAddress = settings.shop_address || '';
+    const shopPhone = settings.shop_phone || '';
+    const shopEmail = settings.shop_email || '';
+
+    const margin = 50;
+    const pageWidth = 595.28;
+    const contentWidth = pageWidth - margin * 2;
+
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="purchase-order-${po.po_number}.pdf"`);
+    doc.pipe(res);
+
+    // Header background
+    doc.rect(0, 0, pageWidth, 120).fill('#4f46e5');
+
+    // Shop name + contact (left)
+    doc.fillColor('white').fontSize(22).font('Helvetica-Bold')
+      .text(shopName, margin, 25, { width: contentWidth * 0.6 });
+    doc.fontSize(9).font('Helvetica').fillColor('#c7d2fe');
+    if (shopAddress) doc.text(shopAddress, margin, 52);
+    if (shopPhone) doc.text(`Tel: ${shopPhone}`, margin, shopAddress ? 64 : 52);
+    if (shopEmail) doc.text(shopEmail, margin, (shopAddress && shopPhone) ? 76 : (shopAddress || shopPhone) ? 64 : 52);
+
+    // Doc type + number (right)
+    doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
+      .text('PURCHASE ORDER', margin + contentWidth * 0.5, 25, { width: contentWidth * 0.5, align: 'right' });
+    doc.fillColor('#c7d2fe').fontSize(10).font('Helvetica')
+      .text(`#${po.po_number}`, margin + contentWidth * 0.5, 52, { width: contentWidth * 0.5, align: 'right' });
+    doc.text(`Date: ${formatDate(po.created_at)}`, margin + contentWidth * 0.5, 65, { width: contentWidth * 0.5, align: 'right' });
+    if (po.expected_delivery_at) {
+      doc.text(`Expected Delivery: ${formatDate(po.expected_delivery_at)}`, margin + contentWidth * 0.5, 78, { width: contentWidth * 0.5, align: 'right' });
+    }
+
+    let y = 140;
+
+    // Two-column: vendor info left, order info right
+    doc.fillColor('#1e293b').fontSize(9).font('Helvetica-Bold').text('VENDOR / SUPPLIER', margin, y);
+    doc.fillColor('#1e293b').fontSize(9).font('Helvetica-Bold').text('ORDER DETAILS', margin + contentWidth * 0.55, y);
+    y += 14;
+
+    doc.font('Helvetica').fillColor('#334155').fontSize(11).text(po.supplier_name || '—', margin, y);
+    doc.fontSize(9).fillColor('#475569');
+    let vendorY = y + 14;
+    if (po.supplier_contact) { doc.text(po.supplier_contact, margin, vendorY); vendorY += 12; }
+    if (po.supplier_phone) { doc.text(`Phone: ${po.supplier_phone}`, margin, vendorY); vendorY += 12; }
+    if (po.supplier_email) { doc.text(`Email: ${po.supplier_email}`, margin, vendorY); vendorY += 12; }
+    if (po.supplier_address) { doc.text(po.supplier_address, margin, vendorY, { width: contentWidth * 0.45 }); vendorY += 12; }
+
+    // Order details right column
+    const detailX = margin + contentWidth * 0.55;
+    const statusColors: Record<string, string> = {
+      draft: '#94a3b8', ordered: '#3b82f6', partial: '#f59e0b', received: '#10b981', cancelled: '#ef4444',
+    };
+    const statusColor = statusColors[po.status] ?? '#94a3b8';
+    doc.fillColor(statusColor).roundedRect(detailX, y, 70, 20, 4).fill();
+    doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
+      .text(String(po.status).toUpperCase(), detailX + 5, y + 6, { width: 60, align: 'center' });
+
+    doc.fillColor('#475569').fontSize(9).font('Helvetica');
+    let detY = y + 28;
+    doc.text(`PO Number: ${po.po_number}`, detailX, detY); detY += 12;
+    doc.text(`Created: ${formatDate(po.created_at)}`, detailX, detY); detY += 12;
+    if (po.ordered_at) { doc.text(`Ordered: ${formatDate(po.ordered_at)}`, detailX, detY); detY += 12; }
+    if (po.expected_delivery_at) { doc.text(`Expected Delivery: ${formatDate(po.expected_delivery_at)}`, detailX, detY); detY += 12; }
+    if (po.ordered_by_name) { doc.text(`Prepared by: ${po.ordered_by_name}`, detailX, detY); detY += 12; }
+
+    y = Math.max(vendorY, detY) + 16;
+
+    // Divider
+    doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(margin, y).lineTo(margin + contentWidth, y).stroke();
+    y += 16;
+
+    // Table header
+    const colWidths = [contentWidth * 0.10, contentWidth * 0.40, contentWidth * 0.12, contentWidth * 0.19, contentWidth * 0.19];
+    const cols = ['SKU', 'Product', 'Qty', 'Unit Price', 'Total'];
+    const colAligns: Array<'left' | 'right' | 'center'> = ['left', 'left', 'center', 'right', 'right'];
+
+    doc.fillColor('#f8fafc').rect(margin, y, contentWidth, 22).fill();
+    doc.fillColor('#475569').fontSize(9).font('Helvetica-Bold');
+    let x = margin;
+    cols.forEach((col, i) => {
+      doc.text(col, x + (i > 0 ? 4 : 0), y + 7, { width: colWidths[i], align: colAligns[i] });
+      x += colWidths[i];
+    });
+    y += 22;
+
+    // Items
+    doc.font('Helvetica');
+    const items: any[] = po.items ?? [];
+    items.forEach((item: any, idx: number) => {
+      const rowY = y;
+      if (idx % 2 === 1) doc.fillColor('#f8fafc').rect(margin, rowY, contentWidth, 22).fill();
+      doc.fillColor('#1e293b').fontSize(9);
+      x = margin;
+      doc.text(item.productSku || '—', x, rowY + 6, { width: colWidths[0] - 4 });
+      x += colWidths[0];
+      doc.text(item.productName || '—', x + 4, rowY + 6, { width: colWidths[1] - 8 });
+      x += colWidths[1];
+      doc.text(String(item.quantity), x + 4, rowY + 6, { width: colWidths[2] - 4, align: 'center' });
+      x += colWidths[2];
+      doc.text(formatAmount(parseFloat(item.unitPrice)), x + 4, rowY + 6, { width: colWidths[3] - 4, align: 'right' });
+      x += colWidths[3];
+      doc.font('Helvetica-Bold').text(formatAmount(parseFloat(item.totalPrice)), x + 4, rowY + 6, { width: colWidths[4] - 4, align: 'right' });
+      doc.font('Helvetica');
+      y += 22;
+    });
+
+    // Total
+    y += 8;
+    doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(margin, y).lineTo(margin + contentWidth, y).stroke();
+    y += 10;
+
+    const totalBoxX = margin + contentWidth * 0.6;
+    const totalBoxW = contentWidth * 0.4;
+    doc.fillColor('#4f46e5').rect(totalBoxX, y, totalBoxW, 36).fill();
+    doc.fillColor('#c7d2fe').fontSize(10).font('Helvetica')
+      .text('TOTAL AMOUNT', totalBoxX + 8, y + 6, { width: totalBoxW - 16 });
+    doc.fillColor('white').fontSize(16).font('Helvetica-Bold')
+      .text(formatAmount(parseFloat(po.total_amount)), totalBoxX + 8, y + 18, { width: totalBoxW - 16, align: 'right' });
+
+    // Notes
+    if (po.notes) {
+      y += 50;
+      doc.fillColor('#475569').fontSize(9).font('Helvetica-Bold').text('NOTES / INSTRUCTIONS', margin, y);
+      y += 12;
+      doc.font('Helvetica').fillColor('#64748b').text(po.notes, margin, y, { width: contentWidth * 0.55 });
+    }
+
+    // Footer
+    const footerY = doc.page.height - 50;
+    doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(margin, footerY).lineTo(margin + contentWidth, footerY).stroke();
+    doc.fillColor('#94a3b8').fontSize(8).font('Helvetica')
+      .text(`Generated by ${shopName} — PrintShop Manager`, margin, footerY + 8, { width: contentWidth, align: 'center' });
+    doc.text(`Purchase Order #${po.po_number} | ${formatDate(po.created_at)}`, margin, footerY + 20, { width: contentWidth, align: 'center' });
+
+    doc.end();
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to generate purchase order PDF' });
+  }
+});
+
 export default router;
