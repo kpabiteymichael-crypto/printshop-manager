@@ -117,7 +117,7 @@ router.get('/:id', authorize('owner', 'manager', 'cashier'), async (req, res) =>
     return res.json({
       ...receipt,
       items: (itemsResult as any).rows ?? [],
-      shopName: settings.shop_name || 'PrintShop Manager',
+      shopName: settings.shop_name || '',
       shopAddress: settings.shop_address || '',
       shopPhone: settings.shop_phone || '',
       shopEmail: settings.shop_email || '',

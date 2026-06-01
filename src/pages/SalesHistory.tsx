@@ -79,6 +79,7 @@ function openPrintWindow(
   shopName: string,
   shopAddress: string,
   shopPhone: string,
+  shopEmail = '',
 ) {
   const receiptUrl = sale.receiptNumber
     ? `${window.location.origin}/receipt/${encodeURIComponent(sale.receiptNumber)}`
@@ -142,6 +143,7 @@ function openPrintWindow(
     <div class="shop-name">${escHtml(shopName)}</div>
     ${shopAddress ? `<div class="shop-sub">${escHtml(shopAddress)}</div>` : ''}
     ${shopPhone ? `<div class="shop-sub">${escHtml(shopPhone)}</div>` : ''}
+    ${shopEmail ? `<div class="shop-sub">${escHtml(shopEmail)}</div>` : ''}
     <div class="dashed"></div>
     <div style="font-weight:600;">RECEIPT</div>
     ${sale.receiptNumber ? `<div class="label">${escHtml(sale.receiptNumber)}</div>` : ''}
@@ -324,6 +326,7 @@ function SaleDetailModal({
   shopName,
   shopAddress,
   shopPhone,
+  shopEmail,
   canRefund,
   onClose,
   onRefunded,
@@ -332,6 +335,7 @@ function SaleDetailModal({
   shopName: string;
   shopAddress: string;
   shopPhone: string;
+  shopEmail: string;
   canRefund: boolean;
   onClose: () => void;
   onRefunded: () => void;
@@ -390,7 +394,7 @@ function SaleDetailModal({
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={() => openPrintWindow(sale, shopName, shopAddress, shopPhone)}
+              onClick={() => openPrintWindow(sale, shopName, shopAddress, shopPhone, shopEmail)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors"
             >
               <Printer size={13} /> Print
@@ -536,17 +540,19 @@ export default function SalesHistory() {
   const [paymentMethod, setPaymentMethod] = useState('');
   const [cashierId, setCashierId] = useState('');
   const [selectedSaleId, setSelectedSaleId] = useState<number | null>(null);
-  const [shopName, setShopName] = useState('PrintShop');
+  const [shopName, setShopName] = useState('');
   const [shopAddress, setShopAddress] = useState('');
   const [shopPhone, setShopPhone] = useState('');
+  const [shopEmail, setShopEmail] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    settingsApi.get().then((s: any) => {
-      if (s.shopName) setShopName(s.shopName);
-      if (s.address) setShopAddress(s.address);
-      if (s.phone) setShopPhone(s.phone);
+    settingsApi.getPublic().then((s: any) => {
+      if (s.shop_name) setShopName(s.shop_name);
+      if (s.shop_address) setShopAddress(s.shop_address);
+      if (s.shop_phone) setShopPhone(s.shop_phone);
+      if (s.shop_email) setShopEmail(s.shop_email);
     }).catch(() => {});
   }, []);
 
@@ -813,6 +819,7 @@ export default function SalesHistory() {
           shopName={shopName}
           shopAddress={shopAddress}
           shopPhone={shopPhone}
+          shopEmail={shopEmail}
           canRefund={user?.role === 'owner' || user?.role === 'manager'}
           onClose={() => setSelectedSaleId(null)}
           onRefunded={() => { setSelectedSaleId(null); fetchSales(); }}

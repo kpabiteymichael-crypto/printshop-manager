@@ -1330,7 +1330,7 @@ export default function POS() {
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [session, setSession] = useState<any>(null);
-  const [shopName, setShopName] = useState('PrintShop Manager');
+  const [shopName, setShopName] = useState('');
   const [shopAddress, setShopAddress] = useState('');
   const [shopPhone, setShopPhone] = useState('');
   const [shopEmail, setShopEmail] = useState('');
