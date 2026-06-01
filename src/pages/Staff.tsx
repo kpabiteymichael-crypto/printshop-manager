@@ -160,6 +160,14 @@ const RETENTION_OPTIONS = [
   { label: 'Clear older than 90 days', days: 90 },
 ];
 
+const RETENTION_LABELS: Record<string, string> = {
+  '7': '7 days',
+  '30': '30 days',
+  '90': '90 days',
+  '180': '180 days',
+  'forever': 'Keep forever',
+};
+
 function SecurityEvents() {
   const { user } = useAuth();
   const isOwner = user?.role === 'owner';
@@ -167,6 +175,7 @@ function SecurityEvents() {
   const [loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [confirmDays, setConfirmDays] = useState<number | null>(null);
+  const [retentionPolicy, setRetentionPolicy] = useState<string>('forever');
 
   const load = () => {
     setLoading(true);
@@ -176,7 +185,12 @@ function SecurityEvents() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    settingsApi.get().then((s: Record<string, string>) => {
+      setRetentionPolicy(s.security_events_retention_days ?? 'forever');
+    }).catch(() => {});
+  }, []);
 
   const handleClear = (days: number) => {
     setConfirmDays(days);
@@ -234,15 +248,20 @@ function SecurityEvents() {
         </div>
       )}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="section-title mb-0 dark:text-white flex items-center gap-2">
-          <ShieldAlert size={16} className="text-red-500" />
-          Security Events
-          {events.length > 0 && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
-              {events.length}
-            </span>
-          )}
-        </h2>
+        <div>
+          <h2 className="section-title mb-0 dark:text-white flex items-center gap-2">
+            <ShieldAlert size={16} className="text-red-500" />
+            Security Events
+            {events.length > 0 && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                {events.length}
+              </span>
+            )}
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Retention: <span className="font-medium text-slate-700 dark:text-slate-300">{RETENTION_LABELS[retentionPolicy] ?? 'Keep forever'}</span>
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           {isOwner && events.length > 0 && (
             <div className="relative group">

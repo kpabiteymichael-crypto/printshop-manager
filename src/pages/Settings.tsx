@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { settingsApi } from '../lib/api';
-import { Settings as SettingsIcon, Save, CheckCircle, Star, Upload, X, Link } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Settings as SettingsIcon, Save, CheckCircle, Star, Upload, X, Link, ShieldAlert } from 'lucide-react';
+
+const RETENTION_OPTIONS = [
+  { value: '7', label: '7 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '180', label: '180 days' },
+  { value: 'forever', label: 'Keep forever' },
+];
 
 export default function Settings() {
+  const { user } = useAuth();
+  const isOwner = user?.role === 'owner';
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -310,6 +321,34 @@ export default function Settings() {
             </div>
           </div>
         </div>
+
+        {isOwner && (
+          <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+            <h2 className="section-title dark:text-white mb-1 flex items-center gap-2">
+              <ShieldAlert size={16} className="text-red-500" /> Security Events Retention
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+              Automatically delete unauthorized access log entries older than the chosen period. Old entries are pruned each time the security events list is loaded.
+            </p>
+            <div>
+              <label className="label dark:text-slate-300">Retention Period</label>
+              <select
+                value={settings.security_events_retention_days ?? 'forever'}
+                onChange={e => set('security_events_retention_days', e.target.value)}
+                className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white max-w-xs"
+              >
+                {RETENTION_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                {(settings.security_events_retention_days ?? 'forever') === 'forever'
+                  ? 'Security events are kept indefinitely until manually cleared.'
+                  : `Security events older than ${RETENTION_OPTIONS.find(o => o.value === settings.security_events_retention_days)?.label} will be removed automatically.`}
+              </p>
+            </div>
+          </div>
+        )}
 
         <button type="submit" disabled={saving} className="btn-primary flex items-center gap-2">
           <Save size={16} /> {saving ? 'Saving...' : 'Save Settings'}

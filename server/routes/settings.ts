@@ -176,6 +176,20 @@ router.get('/security-events', authorize('owner', 'manager'), async (req, res) =
     const limit = Math.min(Number(req.query.limit ?? 100), 200);
     const since = req.query.since as string | undefined;
 
+    // Auto-prune based on retention policy (owner-configured setting)
+    const retentionRows = await db.select().from(settings).where(eq(settings.key, 'security_events_retention_days'));
+    const retentionVal = retentionRows[0]?.value ?? 'forever';
+    if (retentionVal !== 'forever') {
+      const days = Number(retentionVal);
+      if (Number.isFinite(days) && days > 0) {
+        await db.execute(sql`
+          DELETE FROM audit_logs
+          WHERE action = 'unauthorized_access'
+            AND created_at < NOW() - (${days} * INTERVAL '1 day')
+        `);
+      }
+    }
+
     const result = await db.execute(sql`
       SELECT
         al.id,
