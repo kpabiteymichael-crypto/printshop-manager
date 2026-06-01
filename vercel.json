@@ -7,7 +7,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://scoreanalytics.onrender.com/api/:path*"
+      "destination": "https://printshop-manager-ea02.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
@@ -34,6 +34,6 @@
   ],
   "env": {
     "VITE_APP_VERSION": "1.0.0",
-    "VITE_APP_NAME": "EduAnalytics"
+    "VITE_APP_NAME": "PrintShop Manager"
   }
 }
