@@ -469,6 +469,7 @@ router.get('/purchase-order/:id', authorize('owner', 'manager', 'inventory_offic
     const shopAddress = settings.shop_address || '';
     const shopPhone = settings.shop_phone || '';
     const shopEmail = settings.shop_email || '';
+    const logoBuffer = settings.shop_logo ? await fetchLogoBuffer(settings.shop_logo) : null;
 
     const margin = 50;
     const pageWidth = 595.28;
@@ -482,22 +483,31 @@ router.get('/purchase-order/:id', authorize('owner', 'manager', 'inventory_offic
     // Header background
     doc.rect(0, 0, pageWidth, 120).fill('#4f46e5');
 
+    // Logo (if available)
+    let textStartX = margin;
+    if (logoBuffer) {
+      try {
+        doc.image(logoBuffer, margin, 15, { fit: [72, 72] });
+        textStartX = margin + 80;
+      } catch { /* logo rendering failed, ignore */ }
+    }
+
     // Shop name + contact (left)
     doc.fillColor('white').fontSize(22).font('Helvetica-Bold')
-      .text(shopName, margin, 25, { width: contentWidth * 0.6 });
+      .text(shopName, textStartX, 25, { width: contentWidth * 0.6 - (textStartX - margin) });
     doc.fontSize(9).font('Helvetica').fillColor('#c7d2fe');
-    if (shopAddress) doc.text(shopAddress, margin, 52);
-    if (shopPhone) doc.text(`Tel: ${shopPhone}`, margin, shopAddress ? 64 : 52);
-    if (shopEmail) doc.text(shopEmail, margin, (shopAddress && shopPhone) ? 76 : (shopAddress || shopPhone) ? 64 : 52);
+    if (shopAddress) doc.text(shopAddress, textStartX, 52);
+    if (shopPhone) doc.text(`Tel: ${shopPhone}`, textStartX, shopAddress ? 64 : 52);
+    if (shopEmail) doc.text(shopEmail, textStartX, (shopAddress && shopPhone) ? 76 : (shopAddress || shopPhone) ? 64 : 52);
 
     // Doc type + number (right)
     doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
-      .text('PURCHASE ORDER', margin + contentWidth * 0.5, 25, { width: contentWidth * 0.5, align: 'right' });
+      .text('PURCHASE ORDER', margin + contentWidth * 0.55, 25, { width: contentWidth * 0.45, align: 'right' });
     doc.fillColor('#c7d2fe').fontSize(10).font('Helvetica')
-      .text(`#${po.po_number}`, margin + contentWidth * 0.5, 52, { width: contentWidth * 0.5, align: 'right' });
-    doc.text(`Date: ${formatDate(po.created_at)}`, margin + contentWidth * 0.5, 65, { width: contentWidth * 0.5, align: 'right' });
+      .text(`#${po.po_number}`, margin + contentWidth * 0.55, 52, { width: contentWidth * 0.45, align: 'right' });
+    doc.text(`Date: ${formatDate(po.created_at)}`, margin + contentWidth * 0.55, 65, { width: contentWidth * 0.45, align: 'right' });
     if (po.expected_delivery_at) {
-      doc.text(`Expected Delivery: ${formatDate(po.expected_delivery_at)}`, margin + contentWidth * 0.5, 78, { width: contentWidth * 0.5, align: 'right' });
+      doc.text(`Expected Delivery: ${formatDate(po.expected_delivery_at)}`, margin + contentWidth * 0.55, 78, { width: contentWidth * 0.45, align: 'right' });
     }
 
     let y = 140;
