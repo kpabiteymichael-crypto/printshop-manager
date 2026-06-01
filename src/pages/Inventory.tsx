@@ -4,7 +4,7 @@ import { inventoryApi, productsApi, suppliersApi, posApi } from '../lib/api';
 import {
   Package, AlertTriangle, TrendingDown, ArrowUp, ArrowDown, RotateCcw,
   Plus, Search, History, ChevronLeft, ChevronRight, X, Edit2, DollarSign,
-  ClipboardList, Barcode, Camera, CheckCircle, AlertCircle,
+  ClipboardList, Barcode, Camera, CheckCircle, AlertCircle, Trash2, ScanLine,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -14,7 +14,16 @@ const fmtDate = (d: string) => new Date(d).toLocaleString('en-GH', { dateStyle: 
 const STOCK_OUT_REASONS = ['Damaged', 'Expired', 'Lost', 'Sample/Demo', 'Internal Use', 'Write-off', 'Other'];
 const UNITS = ['piece', 'box', 'ream', 'set', 'pack', 'bottle', 'roll', 'book'];
 
-type Tab = 'list' | 'history';
+type Tab = 'list' | 'history' | 'stocktake';
+
+type StocktakeEntry = {
+  inventoryItemId: number;
+  productName: string;
+  productSku: string;
+  currentQty: number;
+  productUnit: string;
+  countedQty: string;
+};
 
 export default function Inventory() {
   const navigate = useNavigate();
@@ -63,6 +72,15 @@ export default function Inventory() {
   const [globalHistory, setGlobalHistory] = useState<{ movements: any[]; total: number; page: number; limit: number }>({ movements: [], total: 0, page: 1, limit: 20 });
   const [globalHistoryLoading, setGlobalHistoryLoading] = useState(false);
   const [globalHistoryType, setGlobalHistoryType] = useState('');
+
+  // ─── Stocktake state ─────────────────────────────────────────────────────────
+  const [stocktakeItems, setStocktakeItems] = useState<StocktakeEntry[]>([]);
+  const [stocktakeSearch, setStocktakeSearch] = useState('');
+  const [stocktakeReason, setStocktakeReason] = useState('Physical stocktake');
+  const [stocktakeCommitting, setStocktakeCommitting] = useState(false);
+  const [stocktakeDone, setStocktakeDone] = useState<{ committed: number; errors: number } | null>(null);
+  const [stocktakeSearchOpen, setStocktakeSearchOpen] = useState(false);
+  const stocktakeSearchRef = useRef<HTMLInputElement>(null);
 
   // ─── Barcode lookup ─────────────────────────────────────────────────────────
   // Opens stock-in or stock-out drawer for the scanned SKU.
@@ -341,6 +359,54 @@ export default function Inventory() {
     finally { setSaving(false); }
   };
 
+  // ─── Stocktake helpers ───────────────────────────────────────────────────────
+  const stocktakeAddItem = (item: any) => {
+    setStocktakeItems(prev => {
+      if (prev.find(e => e.inventoryItemId === item.id)) return prev;
+      return [...prev, {
+        inventoryItemId: item.id,
+        productName: item.productName,
+        productSku: item.productSku,
+        currentQty: item.quantityInStock,
+        productUnit: item.productUnit,
+        countedQty: String(item.quantityInStock),
+      }];
+    });
+    setStocktakeSearch('');
+    setStocktakeSearchOpen(false);
+  };
+
+  const stocktakeRemoveItem = (inventoryItemId: number) => {
+    setStocktakeItems(prev => prev.filter(e => e.inventoryItemId !== inventoryItemId));
+  };
+
+  const stocktakeUpdateCountedQty = (inventoryItemId: number, val: string) => {
+    setStocktakeItems(prev => prev.map(e => e.inventoryItemId === inventoryItemId ? { ...e, countedQty: val } : e));
+  };
+
+  const handleStocktakeCommit = async () => {
+    const valid = stocktakeItems.filter(e => e.countedQty !== '' && Number(e.countedQty) >= 0);
+    if (valid.length === 0) return;
+    setStocktakeCommitting(true);
+    setStocktakeDone(null);
+    try {
+      const result = await inventoryApi.bulkAdjust({
+        adjustments: valid.map(e => ({ inventoryItemId: e.inventoryItemId, quantity: Number(e.countedQty) })),
+        reason: stocktakeReason.trim() || 'Physical stocktake',
+      });
+      const committed = result.results.filter((r: any) => !r.error).length;
+      const errors = result.results.filter((r: any) => r.error).length;
+      setStocktakeDone({ committed, errors });
+      setStocktakeItems([]);
+      setStocktakeReason('Physical stocktake');
+      load();
+    } catch (err: any) {
+      alert(err.message || 'Failed to commit stocktake');
+    } finally {
+      setStocktakeCommitting(false);
+    }
+  };
+
   const rowClass = (qty: number, reorder: number) => {
     if (qty === 0) return 'bg-red-50/60 dark:bg-red-900/10';
     if (qty <= reorder) return 'bg-amber-50/60 dark:bg-amber-900/10';
@@ -426,11 +492,18 @@ export default function Inventory() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit">
-        {([['list', 'Stock List', <Package size={14} />], ['history', 'All History', <History size={14} />]] as const).map(([t, label, icon]) => (
-          <button key={t} onClick={() => setTab(t)}
+      <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit flex-wrap">
+        {([
+          ['list', 'Stock List', <Package size={14} />],
+          ['stocktake', 'Stocktake', <ScanLine size={14} />],
+          ['history', 'All History', <History size={14} />],
+        ] as const).map(([t, label, icon]) => (
+          <button key={t} onClick={() => { setTab(t); if (t !== 'stocktake') setStocktakeDone(null); }}
             className={clsx('flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all', tab === t ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300')}>
             {icon}{label}
+            {t === 'stocktake' && stocktakeItems.length > 0 && (
+              <span className="ml-1 bg-indigo-600 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">{stocktakeItems.length}</span>
+            )}
           </button>
         ))}
       </div>
@@ -537,6 +610,193 @@ export default function Inventory() {
             </div>
           )}
         </>
+      )}
+
+      {tab === 'stocktake' && (
+        <div className="space-y-5">
+          {/* Success banner */}
+          {stocktakeDone && (
+            <div className={clsx(
+              'flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold',
+              stocktakeDone.errors === 0
+                ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                : 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+            )}>
+              <CheckCircle size={16} />
+              <span>
+                Stocktake committed — {stocktakeDone.committed} product{stocktakeDone.committed !== 1 ? 's' : ''} updated
+                {stocktakeDone.errors > 0 && `, ${stocktakeDone.errors} error${stocktakeDone.errors !== 1 ? 's' : ''}`}.
+              </span>
+              <button onClick={() => setStocktakeDone(null)} className="ml-auto"><X size={14} /></button>
+            </div>
+          )}
+
+          {/* Info banner */}
+          <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 text-sm">
+            <ScanLine size={16} className="mt-0.5 flex-shrink-0" />
+            <span>Search or scan products to add them to the count list, enter the physically counted quantity for each, then click <strong>Commit All</strong> to set all stock levels at once. Each correction is recorded in movement history as an Adjustment.</span>
+          </div>
+
+          {/* Product search / add */}
+          <div className="card dark:bg-slate-800 dark:border-slate-700/50 p-4 space-y-3">
+            <h3 className="font-semibold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+              <Search size={14} className="text-indigo-600" /> Add Products to Count
+            </h3>
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                ref={stocktakeSearchRef}
+                value={stocktakeSearch}
+                onChange={e => { setStocktakeSearch(e.target.value); setStocktakeSearchOpen(true); }}
+                onFocus={() => setStocktakeSearchOpen(true)}
+                placeholder="Search product name or SKU…"
+                className="input pl-9 dark:bg-slate-700 dark:border-slate-600 dark:text-white w-full max-w-sm"
+              />
+              {stocktakeSearchOpen && stocktakeSearch.trim() && (
+                <div className="absolute left-0 top-full mt-1 z-30 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl w-full max-w-sm max-h-56 overflow-y-auto">
+                  {(data.items || [])
+                    .filter(i =>
+                      i.productName?.toLowerCase().includes(stocktakeSearch.toLowerCase()) ||
+                      i.productSku?.toLowerCase().includes(stocktakeSearch.toLowerCase())
+                    )
+                    .slice(0, 12)
+                    .map(i => {
+                      const alreadyAdded = stocktakeItems.some(e => e.inventoryItemId === i.id);
+                      return (
+                        <button
+                          key={i.id}
+                          disabled={alreadyAdded}
+                          onClick={() => stocktakeAddItem(i)}
+                          className={clsx(
+                            'w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors',
+                            alreadyAdded && 'opacity-40 cursor-not-allowed'
+                          )}>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-slate-900 dark:text-white truncate">{i.productName}</div>
+                            <div className="text-xs text-slate-400 dark:text-slate-500 font-mono">{i.productSku} · {i.quantityInStock} {i.productUnit} in stock</div>
+                          </div>
+                          {alreadyAdded && <span className="text-xs text-indigo-500 font-semibold flex-shrink-0">Added</span>}
+                        </button>
+                      );
+                    })}
+                  {(data.items || []).filter(i =>
+                    i.productName?.toLowerCase().includes(stocktakeSearch.toLowerCase()) ||
+                    i.productSku?.toLowerCase().includes(stocktakeSearch.toLowerCase())
+                  ).length === 0 && (
+                    <div className="px-4 py-3 text-sm text-slate-400 dark:text-slate-500">No products match "{stocktakeSearch}"</div>
+                  )}
+                </div>
+              )}
+            </div>
+            {/* Click-away to close dropdown */}
+            {stocktakeSearchOpen && (
+              <div className="fixed inset-0 z-20" onClick={() => setStocktakeSearchOpen(false)} />
+            )}
+          </div>
+
+          {/* Count list */}
+          {stocktakeItems.length === 0 ? (
+            <div className="text-center py-16 text-slate-400 dark:text-slate-500">
+              <ScanLine size={36} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-medium">No products added yet</p>
+              <p className="text-xs mt-1">Search above to add products to the count</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="card dark:bg-slate-800 dark:border-slate-700/50 overflow-hidden p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700">
+                        <th className="table-header px-4 py-3 text-left">Product</th>
+                        <th className="table-header px-4 py-3 text-right">System Qty</th>
+                        <th className="table-header px-4 py-3 text-right">Counted Qty</th>
+                        <th className="table-header px-4 py-3 text-right">Difference</th>
+                        <th className="table-header px-4 py-3 text-center w-16"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stocktakeItems.map(entry => {
+                        const counted = entry.countedQty === '' ? null : Number(entry.countedQty);
+                        const diff = counted !== null ? counted - entry.currentQty : null;
+                        return (
+                          <tr key={entry.inventoryItemId} className="border-b border-slate-50 dark:border-slate-700/30">
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-slate-900 dark:text-white">{entry.productName}</div>
+                              <div className="text-xs font-mono text-slate-400 dark:text-slate-500">{entry.productSku}</div>
+                            </td>
+                            <td className="px-4 py-3 text-right text-slate-500 dark:text-slate-400">
+                              {entry.currentQty} <span className="text-xs">{entry.productUnit}</span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                value={entry.countedQty}
+                                onChange={e => stocktakeUpdateCountedQty(entry.inventoryItemId, e.target.value)}
+                                className="input w-24 text-right dark:bg-slate-700 dark:border-slate-600 dark:text-white py-1 px-2"
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              {diff === null ? (
+                                <span className="text-slate-300 dark:text-slate-600">—</span>
+                              ) : diff === 0 ? (
+                                <span className="text-slate-400 dark:text-slate-500 text-xs font-medium">No change</span>
+                              ) : diff > 0 ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">+{diff}</span>
+                              ) : (
+                                <span className="text-red-600 dark:text-red-400 font-semibold">{diff}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <button
+                                onClick={() => stocktakeRemoveItem(entry.inventoryItemId)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                                <Trash2 size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Reason + Commit */}
+              <div className="card dark:bg-slate-800 dark:border-slate-700/50 p-4 space-y-4">
+                <div>
+                  <label className="label dark:text-slate-300">Reason / Reference <span className="text-slate-400 text-xs font-normal">(applied to all adjustments)</span></label>
+                  <input
+                    value={stocktakeReason}
+                    onChange={e => setStocktakeReason(e.target.value)}
+                    placeholder="e.g. Physical stocktake June 2026"
+                    className="input dark:bg-slate-700 dark:border-slate-600 dark:text-white max-w-sm"
+                  />
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    onClick={handleStocktakeCommit}
+                    disabled={stocktakeCommitting || stocktakeItems.every(e => e.countedQty === '')}
+                    className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                    {stocktakeCommitting
+                      ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Committing…</>
+                      : <><CheckCircle size={15} /> Commit All ({stocktakeItems.length} item{stocktakeItems.length !== 1 ? 's' : ''})</>
+                    }
+                  </button>
+                  <button
+                    onClick={() => { setStocktakeItems([]); setStocktakeDone(null); }}
+                    className="btn-secondary text-sm">
+                    Clear All
+                  </button>
+                  <span className="text-xs text-slate-400 dark:text-slate-500">
+                    {stocktakeItems.filter(e => Number(e.countedQty) !== e.currentQty).length} product{stocktakeItems.filter(e => Number(e.countedQty) !== e.currentQty).length !== 1 ? 's' : ''} will be adjusted
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {tab === 'history' && (

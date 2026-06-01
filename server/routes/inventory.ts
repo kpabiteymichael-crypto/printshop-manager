@@ -248,6 +248,45 @@ router.post('/stock-out', authorize('owner', 'manager', 'inventory_officer'), as
   }
 });
 
+router.post('/bulk-adjust', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {
+  try {
+    const { adjustments, reason } = z.object({
+      adjustments: z.array(z.object({
+        inventoryItemId: z.number(),
+        quantity: z.number().min(0),
+      })).min(1),
+      reason: z.string().optional(),
+    }).parse(req.body);
+
+    const results: { inventoryItemId: number; newQuantity?: number; error?: string }[] = [];
+    const note = reason?.trim() || 'Stocktake';
+
+    for (const adj of adjustments) {
+      const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, adj.inventoryItemId)).limit(1);
+      if (!item) {
+        results.push({ inventoryItemId: adj.inventoryItemId, error: 'Item not found' });
+        continue;
+      }
+      const newQty = adj.quantity;
+      await db.update(inventoryItems).set({
+        quantityInStock: newQty,
+        updatedAt: new Date(),
+      }).where(eq(inventoryItems.id, adj.inventoryItemId));
+      await db.execute(sql`
+        INSERT INTO inventory_movements (inventory_item_id, type, quantity, balance_after, reason, created_by)
+        VALUES (${adj.inventoryItemId}, 'adjustment', ${newQty}, ${newQty}, ${note}, ${req.user!.id})
+      `);
+      results.push({ inventoryItemId: adj.inventoryItemId, newQuantity: newQty });
+    }
+
+    return res.json({ success: true, results });
+  } catch (err: any) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: err.errors });
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to bulk adjust inventory' });
+  }
+});
+
 router.post('/adjustment', authorize('owner', 'manager', 'inventory_officer'), async (req: AuthRequest, res) => {
   return handleAdjust(req, res);
 });

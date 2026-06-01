@@ -98,6 +98,8 @@ export const inventoryApi = {
     api.post('/inventory/stock-out', data).then(r => r.data),
   adjust: (data: { inventoryItemId: number; type: string; quantity: number; reason?: string }) =>
     api.post('/inventory/adjust', data).then(r => r.data),
+  bulkAdjust: (data: { adjustments: { inventoryItemId: number; quantity: number }[]; reason?: string }) =>
+    api.post('/inventory/bulk-adjust', data).then(r => r.data),
 };
 
 // ─── Products ─────────────────────────────────────────────
