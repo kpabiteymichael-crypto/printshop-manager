@@ -250,6 +250,8 @@ export const settingsApi = {
   updateStaff: (id: number, data: object) => api.put(`/settings/staff/${id}`, data).then(r => r.data),
   securityEvents: (limit = 100) => api.get('/settings/security-events', { params: { limit } }).then(r => r.data),
   securityEventsCount: () => api.get('/settings/security-events/count').then(r => r.data),
+  clearSecurityEvents: (olderThanDays = 0) =>
+    api.delete('/settings/security-events', { params: olderThanDays > 0 ? { olderThanDays } : {} }).then(r => r.data),
   permissionOverrides: () => api.get('/settings/permission-overrides').then(r => r.data),
   grantOverride: (data: { userId: number; module: string; expiresAt: string; reason?: string }) =>
     api.post('/settings/permission-overrides', data).then(r => r.data),

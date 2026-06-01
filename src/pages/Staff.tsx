@@ -153,9 +153,20 @@ interface SecurityEvent {
   createdAt: string;
 }
 
+const RETENTION_OPTIONS = [
+  { label: 'Clear all', days: 0 },
+  { label: 'Clear older than 7 days', days: 7 },
+  { label: 'Clear older than 30 days', days: 30 },
+  { label: 'Clear older than 90 days', days: 90 },
+];
+
 function SecurityEvents() {
+  const { user } = useAuth();
+  const isOwner = user?.role === 'owner';
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [loading, setLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [confirmDays, setConfirmDays] = useState<number | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -167,6 +178,23 @@ function SecurityEvents() {
 
   useEffect(() => { load(); }, []);
 
+  const handleClear = (days: number) => {
+    setConfirmDays(days);
+  };
+
+  const confirmClear = () => {
+    if (confirmDays === null) return;
+    setClearing(true);
+    settingsApi.clearSecurityEvents(confirmDays)
+      .then(() => {
+        setConfirmDays(null);
+        load();
+        window.dispatchEvent(new CustomEvent('security-events-cleared'));
+      })
+      .catch(() => {})
+      .finally(() => setClearing(false));
+  };
+
   const methodColor = (m: string) => {
     if (m === 'GET') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
     if (m === 'POST') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
@@ -177,6 +205,34 @@ function SecurityEvents() {
 
   return (
     <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+      {confirmDays !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+            <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Confirm Clear</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-300 mb-5">
+              {confirmDays === 0
+                ? 'This will permanently delete all security event records. This cannot be undone.'
+                : `This will permanently delete security events older than ${confirmDays} days. This cannot be undone.`}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmDays(null)}
+                className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmClear}
+                disabled={clearing}
+                className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-60 transition-colors flex items-center gap-1.5"
+              >
+                {clearing ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                {clearing ? 'Clearing…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <h2 className="section-title mb-0 dark:text-white flex items-center gap-2">
           <ShieldAlert size={16} className="text-red-500" />
@@ -187,9 +243,30 @@ function SecurityEvents() {
             </span>
           )}
         </h2>
-        <button onClick={load} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-        </button>
+        <div className="flex items-center gap-2">
+          {isOwner && events.length > 0 && (
+            <div className="relative group">
+              <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                <Trash2 size={12} />
+                Clear
+              </button>
+              <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-20 hidden group-hover:block">
+                {RETENTION_OPTIONS.map(opt => (
+                  <button
+                    key={opt.days}
+                    onClick={() => handleClear(opt.days)}
+                    className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-red-50 dark:hover:bg-red-900/20 first:rounded-t-lg last:rounded-b-lg transition-colors"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button onClick={load} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
         Unauthorized API access attempts (403 Forbidden) recorded in the last 100 events.

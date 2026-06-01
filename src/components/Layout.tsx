@@ -98,7 +98,11 @@ export default function Layout() {
 
   useEffect(() => {
     if (!user || !['owner', 'manager'].includes(user.role)) return;
-    settingsApi.securityEventsCount().then((d: any) => setSecurityEventCount(d.count ?? 0)).catch(() => {});
+    const fetchCount = () =>
+      settingsApi.securityEventsCount().then((d: any) => setSecurityEventCount(d.count ?? 0)).catch(() => {});
+    fetchCount();
+    window.addEventListener('security-events-cleared', fetchCount);
+    return () => window.removeEventListener('security-events-cleared', fetchCount);
   }, [user]);
 
   useEffect(() => {

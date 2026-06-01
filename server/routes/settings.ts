@@ -236,6 +236,38 @@ router.get('/security-events/count', authorize('owner', 'manager'), async (_req,
   }
 });
 
+// DELETE /api/settings/security-events — clear unauthorized_access audit log entries (owner only)
+// Query params: olderThanDays=N  → delete entries older than N days; omit or 0 → delete all
+router.delete('/security-events', authorize('owner'), async (req, res) => {
+  try {
+    const raw = req.query.olderThanDays;
+    let days = 0;
+    if (raw !== undefined) {
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+        return res.status(400).json({ error: 'olderThanDays must be a non-negative integer' });
+      }
+      days = parsed;
+    }
+    if (days > 0) {
+      await db.execute(sql`
+        DELETE FROM audit_logs
+        WHERE action = 'unauthorized_access'
+          AND created_at < NOW() - (${days} * INTERVAL '1 day')
+      `);
+    } else {
+      await db.execute(sql`
+        DELETE FROM audit_logs
+        WHERE action = 'unauthorized_access'
+      `);
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to clear security events' });
+  }
+});
+
 // ─── Permission Overrides ─────────────────────────────────
 
 // GET /api/settings/permission-overrides — list all overrides (owner only, no override bypass)
