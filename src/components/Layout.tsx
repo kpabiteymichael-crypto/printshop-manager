@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useOnline } from '../hooks/useOnline';
 import { useState, useEffect } from 'react';
-import { notificationsApi, authApi, inventoryApi } from '../lib/api';
+import { notificationsApi, authApi, inventoryApi, settingsApi } from '../lib/api';
 import {
   LayoutDashboard, ShoppingCart, Printer, Package, BookOpen,
   Users, Truck, Wallet, Receipt, BarChart3, UserCog, Settings,
@@ -75,6 +75,7 @@ export default function Layout() {
   const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
   const [showLowStockBanner, setShowLowStockBanner] = useState(false);
   const [lowStockDismissed, setLowStockDismissed] = useState(false);
+  const [securityEventCount, setSecurityEventCount] = useState(0);
 
   useEffect(() => {
     notificationsApi.list().then(setNotifications).catch(() => {});
@@ -86,6 +87,11 @@ export default function Layout() {
       setLowStockAlerts(items);
       if (items.length > 0 && !lowStockDismissed) setShowLowStockBanner(true);
     }).catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !['owner', 'manager'].includes(user.role)) return;
+    settingsApi.securityEventsCount().then((d: any) => setSecurityEventCount(d.count ?? 0)).catch(() => {});
   }, [user]);
 
   useEffect(() => {
@@ -178,7 +184,9 @@ export default function Layout() {
       <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
         {userNav.map(item => {
           const isInventory = item.to === '/inventory';
+          const isStaff = item.to === '/staff';
           const badge = isInventory && lowStockAlerts.length > 0 ? lowStockAlerts.length : 0;
+          const secBadge = isStaff && securityEventCount > 0 ? securityEventCount : 0;
           return (
             <NavLink
               key={item.to}
@@ -200,12 +208,20 @@ export default function Layout() {
                     {badge > 9 ? '9+' : badge}
                   </span>
                 )}
+                {secBadge > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full text-white text-[9px] flex items-center justify-center font-bold leading-none">
+                    {secBadge > 9 ? '9+' : secBadge}
+                  </span>
+                )}
               </span>
               {(!collapsed || mobile) && <span>{item.label}</span>}
               {(!collapsed || mobile) && badge > 0 && (
                 <span className="ml-auto text-[10px] font-bold bg-amber-500 text-white px-1.5 py-0.5 rounded-full">{badge}</span>
               )}
-              {(!collapsed || mobile) && badge === 0 && (
+              {(!collapsed || mobile) && secBadge > 0 && (
+                <span className="ml-auto text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full">{secBadge > 99 ? '99+' : secBadge}</span>
+              )}
+              {(!collapsed || mobile) && badge === 0 && secBadge === 0 && (
                 <ChevronRight size={13} className="ml-auto opacity-0 group-hover:opacity-40 transition-opacity" />
               )}
             </NavLink>

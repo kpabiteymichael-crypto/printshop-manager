@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { settingsApi } from '../lib/api';
 import api from '../lib/api';
-import { UserCog, Plus, Shield, CheckCircle, XCircle, Activity, RefreshCw } from 'lucide-react';
+import { UserCog, Plus, Shield, CheckCircle, XCircle, Activity, RefreshCw, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
 
 const ROLES = [
@@ -101,6 +101,138 @@ function ActivityLog({ staffId, staffName }: { staffId: number | null; staffName
   );
 }
 
+interface SecurityEvent {
+  id: number;
+  userId: number | null;
+  userName: string | null;
+  userEmail: string | null;
+  userRole: string | null;
+  route: string;
+  method: string;
+  requiredRoles: string[];
+  ipAddress: string | null;
+  createdAt: string;
+}
+
+function SecurityEvents() {
+  const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    settingsApi.securityEvents(100)
+      .then(setEvents)
+      .catch(() => setEvents([]))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const methodColor = (m: string) => {
+    if (m === 'GET') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+    if (m === 'POST') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
+    if (m === 'PUT' || m === 'PATCH') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
+    if (m === 'DELETE') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+    return 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
+  };
+
+  return (
+    <div className="card dark:bg-slate-800 dark:border-slate-700/50">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="section-title mb-0 dark:text-white flex items-center gap-2">
+          <ShieldAlert size={16} className="text-red-500" />
+          Security Events
+          {events.length > 0 && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+              {events.length}
+            </span>
+          )}
+        </h2>
+        <button onClick={load} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+        Unauthorized API access attempts (403 Forbidden) recorded in the last 100 events.
+      </p>
+      {loading ? (
+        <div className="flex items-center justify-center h-32">
+          <div className="w-6 h-6 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : events.length === 0 ? (
+        <div className="text-center py-10">
+          <ShieldAlert size={32} className="mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+          <p className="text-sm text-slate-400 dark:text-slate-500">No unauthorized access attempts recorded</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700">
+                <th className="table-header px-3 py-2.5 text-left">Staff Member</th>
+                <th className="table-header px-3 py-2.5 text-left">Role</th>
+                <th className="table-header px-3 py-2.5 text-left">Method</th>
+                <th className="table-header px-3 py-2.5 text-left">Route Attempted</th>
+                <th className="table-header px-3 py-2.5 text-left">Required Roles</th>
+                <th className="table-header px-3 py-2.5 text-left">IP Address</th>
+                <th className="table-header px-3 py-2.5 text-left">Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map(ev => (
+                <tr key={ev.id} className="border-b border-slate-50 dark:border-slate-700/30 hover:bg-red-50/30 dark:hover:bg-red-900/10 transition-colors">
+                  <td className="px-3 py-2.5">
+                    {ev.userName ? (
+                      <div>
+                        <div className="font-medium text-slate-900 dark:text-white text-xs">{ev.userName}</div>
+                        <div className="text-[11px] text-slate-400 dark:text-slate-500">{ev.userEmail}</div>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400 dark:text-slate-500 italic">Unknown</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {ev.userRole ? (
+                      <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold', roleColor(ev.userRole))}>
+                        <Shield size={9} />{roleLabel(ev.userRole)}
+                      </span>
+                    ) : <span className="text-xs text-slate-400">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span className={clsx('inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase', methodColor(ev.method))}>
+                      {ev.method}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <code className="text-[11px] text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 rounded font-mono break-all">
+                      {ev.route}
+                    </code>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex flex-wrap gap-1">
+                      {(ev.requiredRoles ?? []).map(r => (
+                        <span key={r} className={clsx('inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold', roleColor(r))}>
+                          {roleLabel(r)}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                    {ev.ipAddress ?? '—'}
+                  </td>
+                  <td className="px-3 py-2.5 text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                    {new Date(ev.createdAt).toLocaleString('en-GH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditStaffModal({ member, onClose, onUpdated }: { member: StaffMember; onClose: () => void; onUpdated: (s: StaffMember) => void }) {
   const [form, setForm] = useState({ name: member.name, phone: member.phone ?? '', role: member.role });
   const [saving, setSaving] = useState(false);
@@ -160,9 +292,13 @@ export default function Staff() {
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'cashier', phone: '' });
   const [saving, setSaving] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
-  const [activeTab, setActiveTab] = useState<'list' | 'activity'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'activity' | 'security'>('list');
+  const [securityCount, setSecurityCount] = useState(0);
 
-  useEffect(() => { settingsApi.getStaff().then(setStaff).finally(() => setLoading(false)); }, []);
+  useEffect(() => {
+    settingsApi.getStaff().then(setStaff).finally(() => setLoading(false));
+    settingsApi.securityEventsCount().then((d: any) => setSecurityCount(d.count ?? 0)).catch(() => {});
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,13 +333,27 @@ export default function Staff() {
 
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-700">
-        {(['list', 'activity'] as const).map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            className={clsx('px-5 py-3 text-sm font-semibold capitalize transition-colors border-b-2 -mb-px',
-              activeTab === tab ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}>
-            {tab === 'list' ? 'Staff List' : 'Activity Log'}
-          </button>
-        ))}
+        <button onClick={() => setActiveTab('list')}
+          className={clsx('px-5 py-3 text-sm font-semibold transition-colors border-b-2 -mb-px',
+            activeTab === 'list' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}>
+          Staff List
+        </button>
+        <button onClick={() => setActiveTab('activity')}
+          className={clsx('px-5 py-3 text-sm font-semibold transition-colors border-b-2 -mb-px',
+            activeTab === 'activity' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}>
+          Activity Log
+        </button>
+        <button onClick={() => setActiveTab('security')}
+          className={clsx('px-5 py-3 text-sm font-semibold transition-colors border-b-2 -mb-px flex items-center gap-2',
+            activeTab === 'security' ? 'border-red-500 text-red-600 dark:text-red-400 dark:border-red-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}>
+          <ShieldAlert size={14} />
+          Security Events
+          {securityCount > 0 && (
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold bg-red-500 text-white">
+              {securityCount > 99 ? '99+' : securityCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {activeTab === 'list' ? (
@@ -290,7 +440,7 @@ export default function Staff() {
             </div>
           </div>
         )
-      ) : (
+      ) : activeTab === 'activity' ? (
         <div className="space-y-4">
           {selectedStaff && (
             <div className="flex items-center gap-3 flex-wrap">
@@ -308,6 +458,8 @@ export default function Staff() {
           )}
           <ActivityLog staffId={selectedStaff?.id ?? null} staffName={selectedStaff?.name ?? ''} />
         </div>
+      ) : (
+        <SecurityEvents />
       )}
 
       {editStaff && (

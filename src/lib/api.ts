@@ -246,6 +246,8 @@ export const settingsApi = {
   getStaff: () => api.get('/settings/staff').then(r => r.data),
   createStaff: (data: object) => api.post('/settings/staff', data).then(r => r.data),
   updateStaff: (id: number, data: object) => api.put(`/settings/staff/${id}`, data).then(r => r.data),
+  securityEvents: (limit = 100) => api.get('/settings/security-events', { params: { limit } }).then(r => r.data),
+  securityEventsCount: () => api.get('/settings/security-events/count').then(r => r.data),
 };
 
 // ─── Notifications ────────────────────────────────────────

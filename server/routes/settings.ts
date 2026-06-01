@@ -160,4 +160,70 @@ router.get('/staff/activity', authorize('owner', 'manager'), async (req, res) =>
   }
 });
 
+// GET /api/settings/security-events — recent unauthorized access attempts
+router.get('/security-events', authorize('owner', 'manager'), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit ?? 100), 200);
+    const since = req.query.since as string | undefined;
+
+    const result = await db.execute(sql`
+      SELECT
+        al.id,
+        al.user_id,
+        u.name    AS user_name,
+        u.email   AS user_email,
+        u.role    AS user_role,
+        al.entity_type AS route,
+        al.new_values  AS details,
+        al.ip_address,
+        al.created_at
+      FROM audit_logs al
+      LEFT JOIN users u ON u.id = al.user_id
+      WHERE al.action = 'unauthorized_access'
+        ${since ? sql`AND al.created_at > ${new Date(since)}` : sql``}
+      ORDER BY al.created_at DESC
+      LIMIT ${limit}
+    `);
+
+    const events = (result as any).rows.map((r: any) => {
+      let parsed: any = {};
+      try { parsed = JSON.parse(r.details ?? '{}'); } catch {}
+      return {
+        id: r.id,
+        userId: r.user_id,
+        userName: r.user_name,
+        userEmail: r.user_email,
+        userRole: r.user_role,
+        route: parsed.route ?? r.route,
+        method: parsed.method ?? 'GET',
+        requiredRoles: parsed.requiredRoles ?? [],
+        ipAddress: r.ip_address,
+        createdAt: r.created_at,
+      };
+    });
+
+    return res.json(events);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch security events' });
+  }
+});
+
+// GET /api/settings/security-events/count — count of recent unauthorized attempts (last 24h)
+router.get('/security-events/count', authorize('owner', 'manager'), async (_req, res) => {
+  try {
+    const result = await db.execute(sql`
+      SELECT COUNT(*) AS cnt
+      FROM audit_logs
+      WHERE action = 'unauthorized_access'
+        AND created_at > NOW() - INTERVAL '24 hours'
+    `);
+    const cnt = Number((result as any).rows[0]?.cnt ?? 0);
+    return res.json({ count: cnt });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to count security events' });
+  }
+});
+
 export default router;

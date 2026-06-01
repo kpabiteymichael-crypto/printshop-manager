@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { db } from '../db/index';
+import { sql } from 'drizzle-orm';
 
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
@@ -34,6 +36,19 @@ export function authorize(...roles: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ error: 'Authentication required' });
     if (!roles.includes(req.user.role)) {
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
+        ?? req.socket?.remoteAddress
+        ?? null;
+      const details = JSON.stringify({
+        method: req.method,
+        route: req.originalUrl,
+        userRole: req.user.role,
+        requiredRoles: roles,
+      });
+      db.execute(sql`
+        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, new_values, ip_address, created_at)
+        VALUES (${req.user.id}, 'unauthorized_access', ${req.path}, NULL, ${details}, ${ip}, NOW())
+      `).catch(() => {});
       return res.status(403).json({ error: 'Forbidden' });
     }
     next();
