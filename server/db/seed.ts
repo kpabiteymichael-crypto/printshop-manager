@@ -10,37 +10,11 @@ import { eq, sql } from 'drizzle-orm';
 export async function seedDatabase() {
   const [userCount] = await db.select({ count: sql<number>`COUNT(*)` }).from(users);
 
+  // On startup: only seed when the database is completely empty.
+  // Never auto-truncate — that destroys live credentials on every cold start.
   if (Number(userCount.count) > 0) {
-    const [ownerUser] = await db
-      .select({ passwordHash: users.passwordHash })
-      .from(users)
-      .where(eq(users.email, 'owner@printshop.com'))
-      .limit(1);
-
-    const passwordValid = ownerUser ? await bcrypt.compare('owner123', ownerUser.passwordHash) : false;
-
-    // Check if we have old (non-Ghanaian) product data by looking for old Philippine SKU
-    const [oldProduct] = await db
-      .select({ sku: products.sku })
-      .from(products)
-      .where(eq(products.sku, 'BK-G5-MATH'))
-      .limit(1);
-
-    if (passwordValid && !oldProduct) {
-      console.log('Database already seeded with Ghanaian data, skipping...');
-      return;
-    }
-    if (oldProduct) {
-      console.log('Old (non-Ghanaian) data detected — re-seeding with Ghanaian data...');
-    } else {
-      console.log('Stale data detected — re-seeding...');
-    }
-    await db.execute(sql`
-      TRUNCATE TABLE notifications, staff_activity, audit_logs, receipts, expenses, expense_categories,
-      sale_items, sales, cash_sessions, purchase_order_items, purchase_orders, suppliers,
-      inventory_movements, inventory_items, print_jobs, services, products, product_categories,
-      customers, settings, users RESTART IDENTITY CASCADE
-    `);
+    console.log('Database already has data, skipping auto-seed.');
+    return;
   }
 
   console.log('Seeding PrintShop database...');
