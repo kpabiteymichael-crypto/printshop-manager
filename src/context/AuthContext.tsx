@@ -49,9 +49,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(data.user);
           return fetchOverrides();
         })
-        .catch(() => {
-          localStorage.removeItem('ps_token');
-          setToken(null);
+        .catch((err: any) => {
+          // Only clear the session on an explicit auth rejection (401).
+          // Network errors (e.g. Render cold-start, no connection) must NOT
+          // wipe the token — the token is still valid, the server just isn't
+          // ready yet.
+          const status = err?.response?.status ?? err?.status;
+          const isAuthFailure = status === 401;
+          if (isAuthFailure) {
+            localStorage.removeItem('ps_token');
+            setToken(null);
+          }
+          // On network error: keep the token; the user stays "logged in"
+          // and individual page requests will show inline error messages.
         })
         .finally(() => setLoading(false));
     } else {
